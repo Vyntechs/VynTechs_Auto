@@ -145,6 +145,7 @@ export function SimpleWorkWorkspace({
   const [draftReady, setDraftReady] = useState(false)
   const escalationAttempt = useRef<EscalationAttempt | null>(null)
   const approvedScopeHeading = useRef<HTMLHeadingElement>(null)
+  const progressHeading = useRef<HTMLHeadingElement>(null)
   const completionHeading = useRef<HTMLHeadingElement>(null)
   const staleHeading = useRef<HTMLHeadingElement>(null)
   const restoredDraftScope = useRef<string | null>(null)
@@ -184,6 +185,7 @@ export function SimpleWorkWorkspace({
   }, [embedded, stale, workspace.authorization, workspace.id])
 
   useEffect(() => {
+    if (workspace.workStatus === 'in_progress') progressHeading.current?.focus()
     if (workspace.workStatus === 'done') completionHeading.current?.focus()
   }, [workspace.workStatus])
 
@@ -643,7 +645,7 @@ export function SimpleWorkWorkspace({
           <>
             <section className={styles.state} aria-labelledby="progress-heading">
               <p className={styles.stateMark}>Now</p>
-              <h2 id="progress-heading">Work in progress</h2>
+              <h2 ref={progressHeading} id="progress-heading" tabIndex={-1}>Work in progress</h2>
               {(workspace.timerEnabled || workspace.clockedOnSince || workspace.activeSeconds > 0) && (
                 <JobClock
                   clockedOnSince={workspace.clockedOnSince}

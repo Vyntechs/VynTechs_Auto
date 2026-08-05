@@ -20,6 +20,7 @@ const workspace = {
   clockedOnSince: null,
   activeSeconds: 0,
   updatedAt: '2026-08-04T20:00:00.000Z',
+  timerEnabled: false,
   authorization: 'approved' as const,
   approvedScope: {
     authorizationPurpose: null,
@@ -166,7 +167,7 @@ function assignment() {
   }
 }
 
-function runningWork() {
+function workProjection(overrides: Record<string, unknown> = {}) {
   return {
     changed: true,
     work: {
@@ -174,16 +175,18 @@ function runningWork() {
       workNotes: null,
       startedAt: RUNNING_AT,
       completedAt: null,
-      clockedOnSince: RUNNING_AT,
+      clockedOnSince: null,
       activeSeconds: 0,
       updatedAt: RUNNING_AT,
+      timerEnabled: false,
+      ...overrides,
     },
   }
 }
 
-test('approved unassigned Claim work opens exact scope before deliberate Clock on', async ({ context, page }, testInfo) => {
+test('timer-off technician claims starts and completes approved work without typing', async ({ context, page }, testInfo) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' })
-  const faults = watchBrowserFaults(page, `${testInfo.project.name}-approved-unassigned`)
+  const faults = watchBrowserFaults(page, `${testInfo.project.name}-timer-off-complete`)
   const network = await installNetworkBoundary(context, page)
   const ledger: LedgerEntry[] = []
   const unhandled: string[] = []
@@ -192,7 +195,7 @@ test('approved unassigned Claim work opens exact scope before deliberate Clock o
     const method = request.method()
     const path = new URL(request.url()).pathname
     const body = request.postData() ? request.postDataJSON() : undefined
-    ledger.push({ scenario: 'approved-unassigned', method, path, body })
+    ledger.push({ scenario: 'timer-off-complete', method, path, body })
     if (method === 'POST' && path.endsWith('/assignment')) {
       await route.fulfill({ status: 200, json: assignment() })
       return
@@ -202,7 +205,33 @@ test('approved unassigned Claim work opens exact scope before deliberate Clock o
       return
     }
     if (method === 'POST' && path.endsWith('/work')) {
-      await route.fulfill({ status: 200, json: runningWork() })
+      if ((body as { action?: string } | undefined)?.action === 'start_work') {
+        await route.fulfill({ status: 200, json: workProjection() })
+        return
+      }
+      if ((body as { action?: string } | undefined)?.action === 'complete') {
+        await route.fulfill({
+          status: 200,
+          json: workProjection({
+            status: 'done',
+            workNotes: 'Completed as approved.',
+            completedAt: '2026-08-04T20:12:00.000Z',
+            updatedAt: '2026-08-04T20:12:00.000Z',
+          }),
+        })
+        return
+      }
+    }
+    if (method === 'GET' && path === '/api/today/jobs') {
+      await route.fulfill({
+        status: 200,
+        json: {
+          todayJobs: {
+            myJobs: [], openJobs: [], createdJobs: [], teamJobs: [], partsJobs: [],
+            readyToCollect: [], linkedSessionIds: [], hasMore: false,
+          },
+        },
+      })
       return
     }
     unhandled.push(`${method} ${path}`)
@@ -213,7 +242,8 @@ test('approved unassigned Claim work opens exact scope before deliberate Clock o
   await page.getByRole('button', { name: 'Claim work' }).click()
   const scope = page.getByRole('heading', { name: 'Exactly what is approved' })
   await expect(scope).toBeFocused()
-  await expect(page.getByRole('button', { name: 'Clock on', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Start work', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: /clock/i })).toHaveCount(0)
   await expect(page.getByText(/Clock running since/)).toHaveCount(0)
   expect(ledger).toHaveLength(2)
   expect(ledger[0]).toMatchObject({ method: 'POST', path: `/api/tickets/${TICKET}/jobs/${JOB}/assignment` })
@@ -222,10 +252,32 @@ test('approved unassigned Claim work opens exact scope before deliberate Clock o
   expect(ledger[1]).toMatchObject({ method: 'GET', path: `/api/tickets/${TICKET}/jobs/${JOB}/work` })
   await expectActiveInlineTools(page, 1)
 
-  await page.getByRole('button', { name: 'Clock on', exact: true }).click()
-  await expect(page.getByText(/Clock running since/).first()).toBeVisible()
+  await page.getByRole('button', { name: 'Start work', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Work in progress' })).toBeFocused()
   expect(ledger[2]).toMatchObject({
-    method: 'POST', path: `/api/tickets/${TICKET}/jobs/${JOB}/work`, body: { action: 'clock_on' },
+    method: 'POST',
+    path: `/api/tickets/${TICKET}/jobs/${JOB}/work`,
+    body: { action: 'start_work', expectedUpdatedAt: workspace.updatedAt },
+  })
+  await expect(page.getByRole('button', { name: 'Complete as approved' })).toBeVisible()
+  await expect(page.getByText(/\bnotes?\b/i)).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Complete as approved' }).click()
+  await expect(page.getByRole('heading', { name: 'Work complete' })).toBeFocused()
+  await expect(page.getByText('Completed as approved.')).toBeVisible()
+  const completedRow = page.getByRole('article', {
+    name: 'Repair order 804: Replace front brakes and inspect rotors',
+  })
+  await expect(completedRow.getByText('Complete')).toBeVisible()
+  await expectActiveInlineTools(page, 1)
+  expect(ledger[3]).toMatchObject({
+    method: 'POST',
+    path: `/api/tickets/${TICKET}/jobs/${JOB}/work`,
+    body: {
+      action: 'complete',
+      expectedUpdatedAt: RUNNING_AT,
+      completion: { kind: 'as_approved' },
+    },
   })
   const opened = page.locator('[data-work-open="true"]')
   await expect(opened).toHaveCSS('border-left-width', '2px')
@@ -233,13 +285,17 @@ test('approved unassigned Claim work opens exact scope before deliberate Clock o
   await expectVisibleInteractiveTargetsAtLeast44(page, 'approved claim handoff')
   await expectNoTechnicianPriceLeakage(page)
   await expectNoHorizontalOverflow(page)
-  await checkpoint(page, testInfo, `${testInfo.project.name}-approved-unassigned-normal-motion`)
+  await checkpoint(page, testInfo, `${testInfo.project.name}-timer-off-complete-normal-motion`)
 
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await expect(opened).toHaveCSS('border-left-width', '2px')
   await expect(opened).toHaveCSS('transition-duration', '0s')
   await expect(opened).toHaveCSS('transform', 'none')
-  await checkpoint(page, testInfo, `${testInfo.project.name}-approved-unassigned-reduced-motion`)
+  await checkpoint(page, testInfo, `${testInfo.project.name}-timer-off-complete-reduced-motion`)
+  await page.getByRole('button', { name: 'Close work' }).click()
+  await expect(completedRow).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Work in the shop' })).toBeFocused()
+  expect(ledger.at(-1)).toMatchObject({ method: 'GET', path: '/api/today/jobs' })
   expect(unhandled).toEqual([])
   expect(network.disallowed).toEqual([])
   expect(network.sockets).toEqual([])
@@ -248,8 +304,8 @@ test('approved unassigned Claim work opens exact scope before deliberate Clock o
   expect(faults.failedRequests).toEqual([])
 })
 
-test('approved preassigned Review and clock on opens exact scope before time', async ({ context, page }, testInfo) => {
-  const faults = watchBrowserFaults(page, `${testInfo.project.name}-approved-preassigned`)
+test('optional detail completes atomically without a separate save step', async ({ context, page }, testInfo) => {
+  const faults = watchBrowserFaults(page, `${testInfo.project.name}-optional-detail`)
   const network = await installNetworkBoundary(context, page)
   const ledger: LedgerEntry[] = []
   await page.route('**/api/**', async (route) => {
@@ -257,31 +313,249 @@ test('approved preassigned Review and clock on opens exact scope before time', a
     const method = request.method()
     const path = new URL(request.url()).pathname
     const body = request.postData() ? request.postDataJSON() : undefined
-    ledger.push({ scenario: 'approved-preassigned', method, path, body })
+    ledger.push({ scenario: 'optional-detail', method, path, body })
     if (method === 'GET' && path.endsWith('/work')) {
-      await route.fulfill({ status: 200, json: { workspace, partRequests: [] } })
+      await route.fulfill({
+        status: 200,
+        json: {
+          workspace: {
+            ...workspace,
+            workStatus: 'in_progress',
+            startedAt: RUNNING_AT,
+            updatedAt: RUNNING_AT,
+          },
+          partRequests: [],
+        },
+      })
       return
     }
     if (method === 'POST' && path.endsWith('/work')) {
-      await route.fulfill({ status: 200, json: runningWork() })
+      await route.fulfill({
+        status: 200,
+        json: workProjection({
+          status: 'done',
+          workNotes: 'Measured final rotor runout at 0.0015 inch.',
+          completedAt: '2026-08-04T20:12:00.000Z',
+          updatedAt: '2026-08-04T20:12:00.000Z',
+        }),
+      })
       return
     }
     await route.fulfill({ status: 599, json: { error: 'unhandled_fixture_call' } })
   })
 
-  await page.goto('/approved-preassigned')
-  await page.getByRole('button', { name: 'Review & clock on' }).click()
-  await expect(page.getByRole('heading', { name: 'Exactly what is approved' })).toBeFocused()
-  await expect(page.getByText(/Clock running since/)).toHaveCount(0)
+  await page.goto('/optional-detail')
+  await page.getByRole('button', { name: 'Review & start work' }).click()
+  await expect(page.getByRole('heading', { name: 'Work in progress' })).toBeFocused()
   expect(ledger).toEqual([expect.objectContaining({ method: 'GET' })])
-  await page.getByRole('button', { name: 'Clock on', exact: true }).click()
-  await expect(page.getByText(/Clock running since/).first()).toBeVisible()
+  await page.getByRole('button', { name: 'Add detail' }).click()
+  await page.getByRole('textbox', { name: 'Anything worth recording? (optional)' })
+    .fill('  Measured final rotor runout at 0.0015 inch.  ')
+  await page.getByRole('button', { name: 'Complete with detail' }).click()
+  await expect(page.getByRole('heading', { name: 'Work complete' })).toBeFocused()
+  expect(ledger[1]).toMatchObject({
+    method: 'POST',
+    body: {
+      action: 'complete',
+      expectedUpdatedAt: RUNNING_AT,
+      completion: {
+        kind: 'with_details',
+        details: 'Measured final rotor runout at 0.0015 inch.',
+      },
+    },
+  })
+  expect(ledger.filter((entry) => entry.method === 'POST')).toHaveLength(1)
   await expectActiveInlineTools(page, 1)
-  await expectVisibleInteractiveTargetsAtLeast44(page, 'preassigned handoff')
+  await expectVisibleInteractiveTargetsAtLeast44(page, 'optional detail completion')
   await expectNoTechnicianPriceLeakage(page)
   await expectNoHorizontalOverflow(page)
-  await checkpoint(page, testInfo, `${testInfo.project.name}-approved-preassigned`)
+  await checkpoint(page, testInfo, `${testInfo.project.name}-optional-detail`)
   expect(ledger.map((entry) => entry.method)).toEqual(['GET', 'POST'])
+  expect(network.disallowed).toEqual([])
+  expect(network.sockets).toEqual([])
+  expect(faults.pageErrors).toEqual([])
+  expect(faults.consoleErrors).toEqual([])
+  expect(faults.failedRequests).toEqual([])
+})
+
+test('personal timer starts pauses resumes and remains stoppable after preference off', async ({ context, page }, testInfo) => {
+  const faults = watchBrowserFaults(page, `${testInfo.project.name}-personal-timer`)
+  const network = await installNetworkBoundary(context, page)
+  const ledger: LedgerEntry[] = []
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const method = request.method()
+    const path = new URL(request.url()).pathname
+    const body = request.postData() ? request.postDataJSON() : undefined
+    ledger.push({ scenario: 'personal-timer', method, path, body })
+    if (method === 'GET' && path.endsWith('/work')) {
+      await route.fulfill({
+        status: 200,
+        json: { workspace: { ...workspace, timerEnabled: true }, partRequests: [] },
+      })
+      return
+    }
+    if (method === 'POST' && path.endsWith('/work')) {
+      const action = (body as { action?: string } | undefined)?.action
+      if (action === 'start_work') {
+        await route.fulfill({ status: 200, json: workProjection({ clockedOnSince: RUNNING_AT, timerEnabled: true }) })
+        return
+      }
+      if (action === 'clock_off') {
+        const finalStop = ledger.filter((entry) => entry.body && (entry.body as { action?: string }).action === 'clock_off').length > 1
+        await route.fulfill({
+          status: 200,
+          json: workProjection({
+            clockedOnSince: null,
+            activeSeconds: finalStop ? 420 : 300,
+            updatedAt: finalStop ? '2026-08-04T20:07:00.000Z' : '2026-08-04T20:05:00.000Z',
+            timerEnabled: !finalStop,
+          }),
+        })
+        return
+      }
+      if (action === 'clock_on') {
+        await route.fulfill({
+          status: 200,
+          json: workProjection({
+            clockedOnSince: '2026-08-04T20:06:00.000Z',
+            activeSeconds: 300,
+            updatedAt: '2026-08-04T20:06:00.000Z',
+            timerEnabled: false,
+          }),
+        })
+        return
+      }
+    }
+    await route.fulfill({ status: 599, json: { error: 'unhandled_fixture_call' } })
+  })
+
+  await page.goto('/personal-timer')
+  await page.getByRole('button', { name: 'Review & start work' }).click()
+  await page.getByRole('button', { name: 'Start work', exact: true }).click()
+  await expect(page.getByText(/Running since/)).toBeVisible()
+  await expect(page.getByText(/not payroll/i)).toBeVisible()
+  await page.getByRole('button', { name: 'Add detail' }).click()
+  const detail = page.getByRole('textbox', { name: 'Anything worth recording? (optional)' })
+  await detail.fill('Torque values are ready for the road test.')
+
+  await page.getByRole('button', { name: 'Clock off' }).click()
+  await expect(page.getByText('Paused')).toBeVisible()
+  await expect(detail).toHaveValue('Torque values are ready for the road test.')
+  await page.getByRole('button', { name: 'Clock on' }).click()
+  await expect(page.getByRole('button', { name: 'Clock off' })).toBeVisible()
+  await expect(detail).toHaveValue('Torque values are ready for the road test.')
+
+  await page.getByRole('button', { name: 'Clock off' }).click()
+  await expect(page.getByRole('button', { name: /Clock on|Clock off/ })).toHaveCount(0)
+  await expect(detail).toHaveValue('Torque values are ready for the road test.')
+  expect(ledger.map((entry) => (entry.body as { action?: string } | undefined)?.action).filter(Boolean))
+    .toEqual(['start_work', 'clock_off', 'clock_on', 'clock_off'])
+  await expectVisibleInteractiveTargetsAtLeast44(page, 'personal timer')
+  await expectNoTechnicianPriceLeakage(page)
+  await expectNoHorizontalOverflow(page)
+  await checkpoint(page, testInfo, `${testInfo.project.name}-personal-timer`)
+  expect(network.disallowed).toEqual([])
+  expect(network.sockets).toEqual([])
+  expect(faults.pageErrors).toEqual([])
+  expect(faults.consoleErrors).toEqual([])
+  expect(faults.failedRequests).toEqual([])
+})
+
+test('detail survives reload and keeps both versions when saved work changed elsewhere', async ({ context, page }, testInfo) => {
+  const faults = watchBrowserFaults(page, `${testInfo.project.name}-detail-conflict`)
+  const network = await installNetworkBoundary(context, page)
+  let workspaceLoads = 0
+  await page.route('**/api/**', async (route) => {
+    const method = route.request().method()
+    const path = new URL(route.request().url()).pathname
+    if (method === 'GET' && path.endsWith('/work')) {
+      workspaceLoads += 1
+      await route.fulfill({
+        status: 200,
+        json: {
+          workspace: {
+            ...workspace,
+            workStatus: 'in_progress',
+            workNotes: workspaceLoads === 1 ? 'Original saved detail.' : 'Saved elsewhere.',
+            startedAt: RUNNING_AT,
+            updatedAt: workspaceLoads === 1 ? RUNNING_AT : '2026-08-04T20:08:00.000Z',
+          },
+          partRequests: [],
+        },
+      })
+      return
+    }
+    await route.fulfill({ status: 599, json: { error: 'unhandled_fixture_call' } })
+  })
+
+  await page.goto('/detail-conflict')
+  await page.getByRole('button', { name: 'Review & start work' }).click()
+  await page.getByRole('button', { name: 'Add detail' }).click()
+  await page.getByRole('textbox', { name: 'Anything worth recording? (optional)' })
+    .fill('My measured detail.')
+
+  await page.reload()
+  await page.getByRole('button', { name: 'Review & start work' }).click()
+  await expect(page.getByText('Your detail')).toBeVisible()
+  await expect(page.getByText('My measured detail.')).toBeVisible()
+  await expect(page.getByText('Saved elsewhere', { exact: true })).toBeVisible()
+  await expect(page.getByText('Saved elsewhere.', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Use my detail' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Use saved detail' })).toBeVisible()
+  expect(workspaceLoads).toBe(2)
+  await expectVisibleInteractiveTargetsAtLeast44(page, 'detail conflict recovery')
+  await expectNoTechnicianPriceLeakage(page)
+  await expectNoHorizontalOverflow(page)
+  await checkpoint(page, testInfo, `${testInfo.project.name}-detail-conflict`)
+  expect(network.disallowed).toEqual([])
+  expect(network.sockets).toEqual([])
+  expect(faults.pageErrors).toEqual([])
+  expect(faults.consoleErrors).toEqual([])
+  expect(faults.failedRequests).toEqual([])
+})
+
+test('ambiguous Start work response reconciles current server truth before reporting', async ({ context, page }, testInfo) => {
+  const faults = watchBrowserFaults(page, `${testInfo.project.name}-ambiguous-start`)
+  const network = await installNetworkBoundary(context, page)
+  const ledger: LedgerEntry[] = []
+  let workGets = 0
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const method = request.method()
+    const path = new URL(request.url()).pathname
+    const body = request.postData() ? request.postDataJSON() : undefined
+    ledger.push({ scenario: 'ambiguous-start', method, path, body })
+    if (method === 'GET' && path.endsWith('/work')) {
+      workGets += 1
+      await route.fulfill({
+        status: 200,
+        json: {
+          workspace: workGets === 1
+            ? workspace
+            : { ...workspace, workStatus: 'in_progress', startedAt: RUNNING_AT, updatedAt: RUNNING_AT },
+          partRequests: [],
+        },
+      })
+      return
+    }
+    if (method === 'POST' && path.endsWith('/work')) {
+      await route.fulfill({ status: 200, json: { ok: true } })
+      return
+    }
+    await route.fulfill({ status: 599, json: { error: 'unhandled_fixture_call' } })
+  })
+
+  await page.goto('/ambiguous-start')
+  await page.getByRole('button', { name: 'Review & start work' }).click()
+  await page.getByRole('button', { name: 'Start work', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Work in progress' })).toBeFocused()
+  expect(ledger.map((entry) => entry.method)).toEqual(['GET', 'POST', 'GET'])
+  expect(ledger[1].body).toMatchObject({ action: 'start_work' })
+  await expectVisibleInteractiveTargetsAtLeast44(page, 'ambiguous start recovery')
+  await expectNoTechnicianPriceLeakage(page)
+  await expectNoHorizontalOverflow(page)
+  await checkpoint(page, testInfo, `${testInfo.project.name}-ambiguous-start`)
   expect(network.disallowed).toEqual([])
   expect(network.sockets).toEqual([])
   expect(faults.pageErrors).toEqual([])
@@ -415,7 +689,7 @@ test('recovery keeps races retries load failures and stale mounted access truthf
 
   scenario = 'load'
   await page.goto('/recovery-load')
-  await page.getByRole('button', { name: 'Review & clock on' }).click()
+  await page.getByRole('button', { name: 'Review & start work' }).click()
   const loadFailure = page.getByRole('alert')
   await expect(loadFailure).toContainText('Work could not be opened here')
   await expect(loadFailure).toBeFocused()
@@ -427,13 +701,13 @@ test('recovery keeps races retries load failures and stale mounted access truthf
 
   scenario = 'stale'
   await page.goto('/recovery-stale')
-  await page.getByRole('button', { name: 'Review & clock on' }).click()
+  await page.getByRole('button', { name: 'Review & start work' }).click()
   await expect(page.getByRole('heading', { name: 'Exactly what is approved' })).toBeFocused()
-  await page.getByRole('button', { name: 'Clock on', exact: true }).click()
+  await page.getByRole('button', { name: 'Start work', exact: true }).click()
   const staleHeading = page.getByRole('heading', { name: 'Work access changed' })
   await expect(staleHeading).toBeFocused()
   await expect(page.getByText('Waiting for customer')).toBeVisible()
-  await expect(page.getByRole('button', { name: /Clock on|Clock off|Clock back on/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Start work|Clock on|Clock off|Clock back on/ })).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Work note' })).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Complete work' })).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Review repair order' })).toBeVisible()

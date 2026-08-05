@@ -77,7 +77,7 @@ describe('simple work workspace', () => {
     expect(screen.queryByRole('button', { name: /clock/i })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Start work' }))
-    await screen.findByRole('heading', { name: 'Work in progress' })
+    expect(await screen.findByRole('heading', { name: 'Work in progress' })).toHaveFocus()
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/tickets/${TICKET}/jobs/${JOB}/work`,
       expect.objectContaining({
