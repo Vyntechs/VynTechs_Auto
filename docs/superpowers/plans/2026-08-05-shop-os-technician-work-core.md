@@ -176,11 +176,11 @@ export async function updateJobTimerPreference(db: AppDb, input: {
 }): Promise<JobTimerPreferenceResult>
 ```
 
-- [ ] **Step 1: Write RED domain authorization tests**
+- [x] **Step 1: Write RED domain authorization tests**
 
 Prove active wrenching people may read/change only themselves; owner/founder team managers may read/change an active same-shop wrenching person; office-only, pending, deactivated, missing, and cross-shop targets fail closed; a role title never makes a tierless person eligible; returned truth contains only profile ID and enabled state.
 
-- [ ] **Step 2: Write RED route-envelope tests**
+- [x] **Step 2: Write RED route-envelope tests**
 
 Self route:
 
@@ -198,7 +198,7 @@ POST /api/team/job-timer { profileId: <uuid>, enabled: boolean }
 
 Prove authentication/paywall precede domain work, bodies are strict, all responses use `Cache-Control: no-store`, same-shop authority is preserved, invalid/domain failures map to bounded status codes, and no profile PII or broader settings escape.
 
-- [ ] **Step 3: Prove RED**
+- [x] **Step 3: Prove RED**
 
 ```bash
 node node_modules/vitest/vitest.mjs run tests/unit/shop-os-job-timer-preference.test.ts tests/unit/account-job-timer-route.test.ts tests/unit/team-job-timer-route.test.ts --maxWorkers=1
@@ -206,15 +206,15 @@ node node_modules/vitest/vitest.mjs run tests/unit/shop-os-job-timer-preference.
 
 Expected: new modules and routes are absent.
 
-- [ ] **Step 4: Implement one shared domain helper**
+- [x] **Step 4: Implement one shared domain helper**
 
 Use the existing persisted-profile, active-membership, founder, and team-management conventions. Select the target by both profile ID and shop ID. Perform updates with the same tenant and active wrenching predicates used for reads, then return the saved projection from the update. Never trust role/skill values from the browser.
 
-- [ ] **Step 5: Implement thin no-store routes**
+- [x] **Step 5: Implement thin no-store routes**
 
 Routes parse UUID/boolean input, construct the current actor from trusted auth context, call the domain helper, and map its bounded result. Do not duplicate authorization or write raw Drizzle queries in routes.
 
-- [ ] **Step 6: Prove GREEN and commit**
+- [x] **Step 6: Prove GREEN and commit**
 
 ```bash
 node node_modules/vitest/vitest.mjs run tests/unit/shop-os-job-timer-preference.test.ts tests/unit/account-job-timer-route.test.ts tests/unit/team-job-timer-route.test.ts --maxWorkers=1
