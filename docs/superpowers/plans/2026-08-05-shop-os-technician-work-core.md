@@ -571,17 +571,17 @@ Expected: proof artifacts match the exact committed component state.
 - Modify only if acceptance evidence changes: `docs/strategy/SHOP_OS_TECHNICIAN_WORK_CORE_TEST_REPORT.md`
 - Modify when a non-obvious correction occurs: `tasks/lessons.md`
 
-- [ ] **Step 1: Run focused static, security, and runtime review**
+- [x] **Step 1: Run focused static, security, and runtime review**
 
 Review the integrated diff from a clean frame for tenant/authz gaps, migration cutoff bypasses, atomicity, stale/ambiguous recovery, hidden running clocks, customer-copy leakage, draft loss, user-facing `note` language, accidental `0050`/`0051` activation, debug code, unrelated changes, and rollback feasibility. Consolidate all blocking findings into one repair wave, then do one focused re-review.
 
-- [ ] **Step 2: Run focused regression packs**
+- [x] **Step 2: Run focused regression packs**
 
 ```bash
 node node_modules/vitest/vitest.mjs run tests/unit/db-migrate.test.ts tests/unit/shop-os-job-timer-preference-schema.test.ts tests/unit/migration-replay.test.ts tests/unit/shop-os-job-timer-preference.test.ts tests/unit/account-job-timer-route.test.ts tests/unit/team-job-timer-route.test.ts tests/unit/account-section.test.tsx tests/unit/team-section.test.tsx tests/unit/shop-os-simple-work.test.ts tests/unit/shop-os-simple-work-routes.test.ts tests/unit/shop-os-simple-work-ui.test.ts tests/unit/shop-os-simple-work-workspace.test.tsx tests/unit/shop-os-simple-work-draft.test.ts tests/unit/shop-os-today-jobs-board.test.tsx --maxWorkers=2
 ```
 
-- [ ] **Step 3: Run the complete repository gate once after repair**
+- [x] **Step 3: Run the complete repository gate once after repair**
 
 ```bash
 node scripts/test-shards.mjs
@@ -595,7 +595,9 @@ git rev-parse HEAD
 
 Attribute every result to the exact `git rev-parse HEAD` observed in the same shell. Any newly generated evidence change must be committed and the affected proof rerun at the new HEAD.
 
-- [ ] **Step 4: Update the durable driver and commit**
+**Final local proof (2026-08-05):** Exact head `312a42d3547fd4c9fb8ae4e204b713e08693547a` passed 4,348 tests across all eight shards, TypeScript, a 71-page production build, and 14/14 phone/desktop Work Rail journeys. Independent static review found one Important missing completion receipt; repair `312a42d` passed focused re-review and a separate security delta with no remaining finding. The plan's draft `run-technician-handoff-proof.mjs` filename never existed; the established runner `node scripts/shop-os-golden-browser.mjs test --suite technician-handoff` supplied the required exact-head proof. The escalated build shell did not expose `pnpm`, so the identical package script was run through `node_modules/.bin/next build`.
+
+- [x] **Step 4: Update the durable driver and commit**
 
 Record outcome, current slice, exact last proof, next safe move, open owner gates, and rollback. Ensure no production action is described as complete.
 
