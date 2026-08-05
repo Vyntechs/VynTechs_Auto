@@ -61,6 +61,7 @@ describe('POST /api/sessions/[id]/lock-in-diagnosis', () => {
         fullName: 'Owner',
         role: 'owner',
         skillTier: null,
+        jobTimerEnabled: false,
         membershipStatus: 'active',
         membershipActivatedAt: new Date(),
         isComp: false,

@@ -50,6 +50,7 @@ const ownerProfile = {
   fullName: 'Owner',
   role: 'owner',
   skillTier: null,
+  jobTimerEnabled: false,
   membershipStatus: 'active' as const,
   membershipActivatedAt: new Date(),
   isComp: false,

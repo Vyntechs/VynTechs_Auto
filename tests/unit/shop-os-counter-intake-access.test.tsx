@@ -30,6 +30,7 @@ const profile = {
   fullName: 'Avery Advisor',
   role: 'advisor',
   skillTier: null,
+  jobTimerEnabled: false,
   membershipStatus: 'active' as const,
   membershipActivatedAt: new Date('2026-07-20T12:00:00Z'),
   isComp: false,

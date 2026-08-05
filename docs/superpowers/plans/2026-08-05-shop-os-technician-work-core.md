@@ -74,7 +74,7 @@ The helper returns the selected pending files or throws before database writes. 
 jobTimerEnabled: boolean('job_timer_enabled').default(false).notNull()
 ```
 
-- [ ] **Step 1: Write RED migration-selection tests**
+- [x] **Step 1: Write RED migration-selection tests**
 
 Add tests proving:
 
@@ -86,7 +86,7 @@ Add tests proving:
 6. Non-production `apply` without `--through` retains the existing all-pending behavior.
 7. Drift and missing-file checks still run before selection.
 
-- [ ] **Step 2: Prove RED**
+- [x] **Step 2: Prove RED**
 
 ```bash
 node node_modules/vitest/vitest.mjs run tests/unit/db-migrate.test.ts --maxWorkers=1
@@ -94,7 +94,7 @@ node node_modules/vitest/vitest.mjs run tests/unit/db-migrate.test.ts --maxWorke
 
 Expected: imports and targeted-cutoff assertions fail because `apply` currently ignores `--through`.
 
-- [ ] **Step 3: Implement the pure selector and wire it into apply**
+- [x] **Step 3: Implement the pure selector and wire it into apply**
 
 Resolve a cutoff by exact unique prefix, then select pending files through that filename. For a production cutoff, enforce this invariant before `CREATE_LEDGER_SQL` or any migration statement:
 
@@ -106,7 +106,7 @@ if (production && through && selected.some((file) => file.name !== target.name))
 
 Do not weaken the no-ledger safeguard, checksum drift refusal, missing-file refusal, per-file transaction, redaction, or filename ordering.
 
-- [ ] **Step 4: Write the additive migration and schema projection**
+- [x] **Step 4: Write the additive migration and schema projection**
 
 The complete migration is one additive statement:
 
@@ -117,11 +117,11 @@ alter table profiles
 
 Add the matching Drizzle field. In `tests/helpers/db.ts`, add a narrowly named `ensureJobTimerPreferenceMigration(client)` after the customer-copy prerequisite and before paused `0050`/`0051` helpers. It must inspect the exact column contract, apply only this file when absent, and verify boolean/not-null/default-false afterward.
 
-- [ ] **Step 5: Write schema/replay tests**
+- [x] **Step 5: Write schema/replay tests**
 
 Prove clean apply, default false for existing/new profiles, exact replay safety, non-null enforcement, filename placement, and that applying the helper does not create the `0050` customer-copy or `0051` correction objects.
 
-- [ ] **Step 6: Prove GREEN and commit**
+- [x] **Step 6: Prove GREEN and commit**
 
 ```bash
 node node_modules/vitest/vitest.mjs run tests/unit/db-migrate.test.ts tests/unit/shop-os-job-timer-preference-schema.test.ts tests/unit/migration-replay.test.ts --maxWorkers=1

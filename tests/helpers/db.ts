@@ -74,6 +74,7 @@ export async function createTestDb(): Promise<{
   await ensureShopOsQuoteDeferralMigration(client)
   await ensureIntentAwareIntakeMigration(client)
   await ensureCustomerCopyIdentityMigration(client)
+  await ensureJobTimerPreferenceMigration(client)
   await ensureCustomerApprovalLinksMigration(client)
   await ensureTicketCorrectionMigration(client)
   return {
@@ -215,6 +216,37 @@ export async function ensureCustomerCopyIdentityMigration(client: PGlite): Promi
       )
   `)
   if (applied.rows.length !== 6) throw new Error('customer copy identity migration failed')
+}
+
+export async function ensureJobTimerPreferenceMigration(client: PGlite): Promise<void> {
+  const inspect = async () => {
+    const result = await client.query<{
+      data_type: string
+      is_nullable: string
+      column_default: string | null
+    }>(`
+      select data_type, is_nullable, column_default
+      from information_schema.columns
+      where table_schema = 'public'
+        and table_name = 'profiles'
+        and column_name = 'job_timer_enabled'
+    `)
+    return result.rows[0] ?? null
+  }
+  const complete = (column: Awaited<ReturnType<typeof inspect>>) => column?.data_type === 'boolean'
+    && column.is_nullable === 'NO'
+    && column.column_default === 'false'
+
+  const before = await inspect()
+  if (complete(before)) return
+  if (before !== null) throw new Error('partial job timer preference schema in ephemeral database')
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0049a_shop_os_job_timer_preference.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+  if (!complete(await inspect())) throw new Error('job timer preference migration failed')
 }
 
 export async function ensureIntentAwareIntakeMigration(client: PGlite): Promise<void> {

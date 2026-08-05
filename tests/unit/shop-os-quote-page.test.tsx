@@ -76,7 +76,7 @@ const profile = {
   id: '00000000-0000-0000-0000-000000000201',
   userId: '00000000-0000-0000-0000-000000000301',
   shopId: '00000000-0000-0000-0000-000000000401',
-  fullName: 'Avery Advisor', role: 'advisor', skillTier: 2,
+  fullName: 'Avery Advisor', role: 'advisor', skillTier: 2, jobTimerEnabled: false,
   membershipStatus: 'active' as const,
   membershipActivatedAt: new Date('2026-07-10T12:00:00Z'),
   isComp: false, isCurator: false, lastSeenWhatsNewAt: null,

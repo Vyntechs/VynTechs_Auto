@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 // @ts-ignore -- The runner is intentionally Node-only JavaScript with runtime-tested exports.
-import { applyRefusalReason, checksum, isMigrationFilename, listMigrationFiles, planMigrations, redactError } from '../../scripts/db-migrate.mjs'
+import { applyRefusalReason, checksum, isMigrationFilename, listMigrationFiles, planMigrations, redactError, selectApplyMigrations } from '../../scripts/db-migrate.mjs'
 
 type PlanFile = { name: string; checksum: string }
 type Plan = { pending: PlanFile[]; drifted: string[]; missing: string[] }
@@ -15,6 +15,13 @@ const file = (name: string, contents: string): PlanFile => ({
   name,
   checksum: (checksum as (value: string) => string)(contents),
 })
+
+const select = selectApplyMigrations as (input: {
+  files: PlanFile[]
+  pending: PlanFile[]
+  through: string | null
+  production: boolean
+}) => PlanFile[]
 
 describe('migration runner', () => {
   it('refuses to apply to a database that has tables but no ledger', () => {
@@ -35,6 +42,94 @@ describe('migration runner', () => {
     expect(result.pending.map((entry) => entry.name)).toEqual(['0002_b.sql', '0003_c.sql'])
     expect(result.drifted).toEqual([])
     expect(result.missing).toEqual([])
+  })
+
+  it('selects only the exact suffixed migration at a production cutoff', () => {
+    const files = [
+      file('0049_shop_os_today.sql', 'today'),
+      file('0049a_shop_os_job_timer_preference.sql', 'timer'),
+      file('0050_shop_os_customer_copy.sql', 'copy'),
+      file('0051_shop_os_ticket_corrections.sql', 'correction'),
+    ]
+
+    expect(select({
+      files,
+      pending: files.slice(1),
+      through: '0049a',
+      production: true,
+    }).map((entry) => entry.name)).toEqual([
+      '0049a_shop_os_job_timer_preference.sql',
+    ])
+  })
+
+  it('refuses a missing or ambiguous migration cutoff', () => {
+    const files = [
+      file('0049_shop_os_today.sql', 'today'),
+      file('0049a_shop_os_job_timer_preference.sql', 'timer'),
+    ]
+
+    expect(() => select({ files, pending: files, through: '0060', production: true }))
+      .toThrow('No migration matches --through 0060')
+    expect(() => select({ files, pending: files, through: '0049', production: true }))
+      .toThrow('Multiple migrations match --through 0049')
+  })
+
+  it('refuses a production cutoff when an unexpected older migration is pending', () => {
+    const files = [
+      file('0048_shop_os_intake.sql', 'intake'),
+      file('0049_shop_os_today.sql', 'today'),
+      file('0049a_shop_os_job_timer_preference.sql', 'timer'),
+      file('0050_shop_os_customer_copy.sql', 'copy'),
+    ]
+
+    expect(() => select({
+      files,
+      pending: [files[0], files[2], files[3]],
+      through: '0049a',
+      production: true,
+    })).toThrow('Production cutoff 0049a would apply unexpected migrations')
+  })
+
+  it('selects every pending migration through a non-production cutoff', () => {
+    const files = [
+      file('0048_shop_os_intake.sql', 'intake'),
+      file('0049_shop_os_today.sql', 'today'),
+      file('0049a_shop_os_job_timer_preference.sql', 'timer'),
+      file('0050_shop_os_customer_copy.sql', 'copy'),
+    ]
+
+    expect(select({
+      files,
+      pending: [files[0], files[2], files[3]],
+      through: '0049a',
+      production: false,
+    }).map((entry) => entry.name)).toEqual([
+      '0048_shop_os_intake.sql',
+      '0049a_shop_os_job_timer_preference.sql',
+    ])
+  })
+
+  it('keeps all-pending apply behavior without a cutoff and no-ops an applied cutoff', () => {
+    const files = [
+      file('0049_shop_os_today.sql', 'today'),
+      file('0049a_shop_os_job_timer_preference.sql', 'timer'),
+      file('0050_shop_os_customer_copy.sql', 'copy'),
+    ]
+
+    expect(select({ files, pending: files.slice(1), through: null, production: false }))
+      .toEqual(files.slice(1))
+    expect(select({ files, pending: [files[2]], through: '0049a', production: true }))
+      .toEqual([])
+  })
+
+  it('requires an explicit cutoff before any production apply', () => {
+    const files = [
+      file('0049a_shop_os_job_timer_preference.sql', 'timer'),
+      file('0050_shop_os_customer_copy.sql', 'copy'),
+    ]
+
+    expect(() => select({ files, pending: files, through: null, production: true }))
+      .toThrow('Production apply requires --through')
   })
 
   it('reports a migration whose contents changed after it was applied', () => {
@@ -68,6 +163,10 @@ describe('migration runner', () => {
     expect(names[0]).toMatch(/^0000_/)
     expect(names.at(-1)).toBe('0051_shop_os_ticket_corrections.sql')
     expect([...names]).toEqual([...names].sort())
+    expect(names.indexOf('0049a_shop_os_job_timer_preference.sql'))
+      .toBe(names.indexOf('0049_shop_os_customer_copy_identity.sql') + 1)
+    expect(names.indexOf('0050_shop_os_customer_approval_links.sql'))
+      .toBe(names.indexOf('0049a_shop_os_job_timer_preference.sql') + 1)
     expect(names.indexOf('0011a_session_curator_columns.sql'))
       .toBeGreaterThan(names.findIndex((name) => name.startsWith('0011_')))
   })

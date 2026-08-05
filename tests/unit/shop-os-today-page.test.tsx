@@ -72,6 +72,7 @@ const profile = {
   fullName: 'Taylor Tech',
   role: 'tech',
   skillTier: 2,
+  jobTimerEnabled: false,
   membershipStatus: 'active' as const,
   membershipActivatedAt: new Date('2026-07-10T12:00:00Z'),
   isComp: false,

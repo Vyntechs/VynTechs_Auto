@@ -117,6 +117,7 @@ export const profiles = pgTable(
     fullName: text('full_name'),
     role: text('role').default('tech').notNull(),
     skillTier: integer('skill_tier'),
+    jobTimerEnabled: boolean('job_timer_enabled').default(false).notNull(),
     membershipStatus: text('membership_status', {
       enum: ['pending', 'active'],
     }).default('active').notNull(),
