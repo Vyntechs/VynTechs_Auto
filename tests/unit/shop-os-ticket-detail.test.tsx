@@ -104,6 +104,10 @@ vi.mock('@/components/screens/inline-quote-workspace', () => ({
         workStatus: 'open',
         approvalState: 'quote_ready',
       }])}>Publish quote state</button>
+      <button type="button" onClick={() => onProjection([
+        { id: 'job-1', workStatus: 'open', approvalState: 'quote_ready' },
+        { id: 'job-2', workStatus: 'open', approvalState: 'quote_ready' },
+      ])}>Publish multi-job quote state</button>
       <button type="button" onClick={() => onProjection([{
         id: 'job-1',
         workStatus: 'open',
@@ -775,6 +779,30 @@ describe('TicketDetailScreen', () => {
     expect(screen.getByRole('button', { name: 'Record approval' })).toBeInTheDocument()
     expect(jobRow).toHaveFocus()
     expect(routerRefreshMock).not.toHaveBeenCalled()
+  })
+
+  it('returns multi-job Prepare focus to the job that opened the ticket builder', async () => {
+    const user = userEvent.setup()
+    render(
+      <TicketDetailScreen
+        ticket={ticket({ jobs: [
+          job({ id: 'job-1', title: 'Diagnose brake vibration', assignedTechId: 'advisor-1' }),
+          job({ id: 'job-2', title: 'Replace front pads', kind: 'repair', assignedTechId: 'advisor-1' }),
+        ] })}
+        canBuildQuote
+        currentProfileId="advisor-1"
+        role="advisor"
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '2 jobs need attention' }))
+    await user.click(screen.getByRole('button', { name: 'Replace front pads' }))
+    const selectedJob = screen.getByRole('heading', { name: 'Replace front pads' }).closest('li')!
+    await user.click(within(selectedJob).getByRole('button', { name: 'Build ticket' }))
+    await user.click(screen.getByRole('button', { name: 'Publish multi-job quote state' }))
+
+    expect(screen.queryByRole('region', { name: 'Quote for this repair order' })).toBeNull()
+    expect(selectedJob).toHaveFocus()
   })
 
   it('mounts one correction entry at identity, concern, and only eligible job facts', () => {

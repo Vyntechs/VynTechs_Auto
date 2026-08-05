@@ -37,7 +37,9 @@ components.
   line, then observes subtotal $327.50, taxable subtotal $140.00, tax $11.55,
   and total $339.05 before explicitly preparing that exact quote.
 - A technician can edit the assigned job while another technician's job stays
-  visible and read-only. The technician never receives ticket-wide Prepare.
+  visible and read-only for quote-line and manual-sourcing controls. Existing
+  story behavior is outside this slice. The technician never receives
+  ticket-wide Prepare.
 - Equal-ranked work requires an explicit job choice before `Build ticket`
   appears.
 - `Add work` stays collapsed until requested. O'Reilly First Call, PartsTech,
@@ -73,8 +75,8 @@ git diff --check
 ## Preserved implementation renders
 
 - `docs/proofs/artifacts/living-repair-order/implementation-phone-empty-390x844.png`
-- `docs/proofs/artifacts/living-repair-order/implementation-phone-lines-390x844.png`
-- `docs/proofs/artifacts/living-repair-order/implementation-phone-prepared-390x844.png`
+- `docs/proofs/artifacts/living-repair-order/implementation-phone-lines-full-390x3024.png`
+- `docs/proofs/artifacts/living-repair-order/implementation-phone-prepared-full-390x1500.png`
 - `docs/proofs/artifacts/living-repair-order/implementation-desktop-lines-1440x900.png`
 - `docs/proofs/artifacts/living-repair-order/implementation-desktop-prepared-1440x900.png`
 

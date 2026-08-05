@@ -255,10 +255,13 @@ export function TicketDetailScreen({
     setCustomerCopyRefreshing(false)
   }, [effectiveCustomerCopy])
   const applyQuoteProjection = useCallback((projection: QuoteWorkspaceProjection) => {
-    const preparedJob = projection.find((projected) => (
+    const preparedJobs = projection.filter((projected) => (
       approvalStateRef.current.get(projected.id) === 'pending_quote'
         && projected.approvalState === 'quote_ready'
     ))
+    const preparedJob = (activeTool?.kind === 'quote' && activeTool.jobId
+      ? preparedJobs.find((projected) => projected.id === activeTool.jobId)
+      : null) ?? preparedJobs[0]
     const financialStateChanged = projection.some((projected) => (
       approvalStateRef.current.get(projected.id) !== projected.approvalState
     ))

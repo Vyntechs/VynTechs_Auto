@@ -113,7 +113,7 @@ test.describe('hermetic real-component implementation proof', () => {
       path: resolve(
         evidenceDirectory,
         viewport?.width === 390
-          ? 'implementation-phone-lines-390x844.png'
+          ? 'implementation-phone-lines-full-390x3024.png'
           : 'implementation-desktop-lines-1440x900.png',
       ),
       fullPage: viewport?.width === 390,
@@ -135,7 +135,7 @@ test.describe('hermetic real-component implementation proof', () => {
       path: resolve(
         evidenceDirectory,
         viewport?.width === 390
-          ? 'implementation-phone-prepared-390x844.png'
+          ? 'implementation-phone-prepared-full-390x1500.png'
           : 'implementation-desktop-prepared-1440x900.png',
       ),
       fullPage: viewport?.width === 390,
