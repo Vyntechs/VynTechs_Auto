@@ -416,19 +416,19 @@ type SimpleWorkDraftValuesV2 = {
 }
 ```
 
-- [ ] **Step 1: Write RED copy and action-hierarchy tests**
+- [x] **Step 1: Write RED copy and action-hierarchy tests**
 
 Prove approved open work presents one dominant `Start work`; in-progress clean work presents one dominant `Complete as approved` and secondary `Add detail`; opening detail shows `Anything worth recording? (optional)` and changes the dominant action to `Complete with detail` only when nonempty; user-visible content contains no standalone `note`, `notes`, `work note`, or Save-note control.
 
-- [ ] **Step 2: Write RED timer-visibility tests**
+- [x] **Step 2: Write RED timer-visibility tests**
 
 Prove timer controls are absent when disabled and stopped; appear as secondary controls when enabled; remain visible/stoppable when a timer is running after preference turns off; Start work never looks like a timer command; a running clock is distinct from payroll copy.
 
-- [ ] **Step 3: Write RED v2/legacy draft tests**
+- [x] **Step 3: Write RED v2/legacy draft tests**
 
 Prove v2 keys include the bounded scope; exact compatible v1 draft decodes and migrates into v2; corrupt/wrong actor/job/authorization drafts fail closed; clock-only server changes do not invalidate a dirty detail; a changed saved-detail baseline yields both local and server values as a conflict instead of returning null; auxiliary drafts remain intact.
 
-- [ ] **Step 4: Write RED ambiguous-response and conflict tests**
+- [x] **Step 4: Write RED ambiguous-response and conflict tests**
 
 For timeout, invalid envelope, 409, or 5xx, prove the client GETs current work and classifies exact intent truth:
 
@@ -442,7 +442,7 @@ with_details completion -> done && workNotes === submitted normalized detail
 
 If exact truth cannot be proven, show `Couldn't confirm what happened` and retain every draft. Show `Your detail` and `Saved elsewhere` with deliberate `Use my detail` / `Use saved detail` choices when the baseline changed.
 
-- [ ] **Step 5: Prove RED**
+- [x] **Step 5: Prove RED**
 
 ```bash
 node node_modules/vitest/vitest.mjs run tests/unit/shop-os-simple-work-workspace.test.tsx tests/unit/shop-os-simple-work-draft.test.ts --maxWorkers=1
@@ -450,19 +450,19 @@ node node_modules/vitest/vitest.mjs run tests/unit/shop-os-simple-work-workspace
 
 Expected: new action hierarchy, copy, draft version, conflict, and recovery assertions fail.
 
-- [ ] **Step 6: Implement v2 draft with exact v1 migration**
+- [x] **Step 6: Implement v2 draft with exact v1 migration**
 
 Read v2 first. If absent, derive the exact existing v1 key, validate actor/ticket/job/authorization compatibility, map `note` to `detail`, store v2, then remove only that exact legacy key. Return a discriminated decode result for `clean`, `recovered`, `conflict`, or `invalid`; never discard a valid local value because `updatedAt` changed for a clock action.
 
-- [ ] **Step 7: Implement the Work Rail state and recovery**
+- [x] **Step 7: Implement the Work Rail state and recovery**
 
 Rename local/UI concepts from note to detail while translating only at the server projection boundary. Keep detail state separate from general workspace replacement so `applyWork` never clobbers dirty local text on clock responses. Use one mutation runner that POSTs, validates the strict envelope, and GET-reconciles ambiguous outcomes. Clear detail only after exact server-confirmed completion.
 
-- [ ] **Step 8: Implement calm visual hierarchy**
+- [x] **Step 8: Implement calm visual hierarchy**
 
 Reuse existing primitives and CSS variables. The Work Rail has one dominant button at a time; Add detail and timer controls are secondary. Preserve 44×44px targets, visible focus, readable receipt, reduced motion, and small-screen containment. Do not add generic cards or dashboard chrome.
 
-- [ ] **Step 9: Prove GREEN and commit**
+- [x] **Step 9: Prove GREEN and commit**
 
 ```bash
 node node_modules/vitest/vitest.mjs run tests/unit/shop-os-simple-work-workspace.test.tsx tests/unit/shop-os-simple-work-draft.test.ts --maxWorkers=1

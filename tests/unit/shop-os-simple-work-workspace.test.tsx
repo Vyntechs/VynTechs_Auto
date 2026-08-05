@@ -32,11 +32,238 @@ const base: SimpleWorkWorkspaceView = {
   },
 }
 
+function workProjection(
+  overrides: Partial<{
+    status: 'open' | 'in_progress' | 'done'
+    workNotes: string | null
+    startedAt: string | null
+    completedAt: string | null
+    clockedOnSince: string | null
+    activeSeconds: number
+    updatedAt: string
+    timerEnabled: boolean
+  }> = {},
+) {
+  return {
+    status: 'in_progress' as const,
+    workNotes: null,
+    startedAt: '2026-07-11T12:01:00.000Z',
+    completedAt: null,
+    clockedOnSince: null,
+    activeSeconds: 0,
+    updatedAt: '2026-07-11T12:01:00.000Z',
+    timerEnabled: false,
+    ...overrides,
+  }
+}
+
 describe('simple work workspace', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     sessionStorage.clear()
     vi.stubGlobal('crypto', { randomUUID: vi.fn(() => REQUEST) })
+  })
+
+  it('uses Start work as the only dominant action before work begins', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ changed: true, work: workProjection() }), {
+        status: 200,
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={base} />)
+
+    expect(screen.getByRole('button', { name: 'Start work' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: /clock/i })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start work' }))
+    await screen.findByRole('heading', { name: 'Work in progress' })
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/tickets/${TICKET}/jobs/${JOB}/work`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'start_work',
+          expectedUpdatedAt: base.updatedAt,
+        }),
+      }),
+    )
+    expect(screen.getByRole('button', { name: 'Complete as approved' })).toBeEnabled()
+  })
+
+  it('keeps detail optional and completes it in the same dominant action', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        changed: true,
+        work: workProjection({
+          status: 'done',
+          workNotes: 'Measured final ride height.',
+          completedAt: '2026-07-11T12:05:00.000Z',
+          updatedAt: '2026-07-11T12:05:00.000Z',
+        }),
+      }), { status: 200 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const inProgress = {
+      ...base,
+      workStatus: 'in_progress' as const,
+      startedAt: '2026-07-11T12:01:00.000Z',
+    }
+    const { container } = render(
+      <SimpleWorkWorkspace ticket={ticket} initialWorkspace={inProgress} />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Complete as approved' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Add detail' })).toBeEnabled()
+    expect(container.textContent).not.toMatch(/\bnotes?\b/i)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add detail' }))
+    const detail = screen.getByRole('textbox', {
+      name: 'Anything worth recording? (optional)',
+    })
+    fireEvent.change(detail, { target: { value: '  Measured final ride height.  ' } })
+    expect(screen.getByRole('button', { name: 'Complete with detail' })).toBeEnabled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Complete with detail' }))
+    await screen.findByRole('heading', { name: 'Work complete' })
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/tickets/${TICKET}/jobs/${JOB}/work`,
+      expect.objectContaining({
+        body: JSON.stringify({
+          action: 'complete',
+          expectedUpdatedAt: inProgress.updatedAt,
+          completion: {
+            kind: 'with_details',
+            details: 'Measured final ride height.',
+          },
+        }),
+      }),
+    )
+  })
+
+  it('shows timer controls only for an enabled timer or a clock that still needs stopping', () => {
+    const inProgress = { ...base, workStatus: 'in_progress' as const }
+    const { rerender } = render(
+      <SimpleWorkWorkspace ticket={ticket} initialWorkspace={inProgress} />,
+    )
+    expect(screen.queryByRole('button', { name: 'Clock on' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Clock off' })).not.toBeInTheDocument()
+
+    rerender(
+      <SimpleWorkWorkspace
+        key="enabled"
+        ticket={ticket}
+        initialWorkspace={{ ...inProgress, timerEnabled: true }}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Clock on' })).toBeInTheDocument()
+    expect(screen.getByText(/not payroll/i)).toBeInTheDocument()
+
+    rerender(
+      <SimpleWorkWorkspace
+        key="running-disabled"
+        ticket={ticket}
+        initialWorkspace={{
+          ...inProgress,
+          timerEnabled: false,
+          clockedOnSince: '2026-07-11T12:01:00.000Z',
+        }}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Clock off' })).toBeInTheDocument()
+  })
+
+  it.each([
+    ['a timeout', () => Promise.reject(new TypeError('lost response'))],
+    ['an invalid envelope', () => Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }))],
+    ['a conflict', () => Promise.resolve(new Response(JSON.stringify({ error: 'conflict' }), { status: 409 }))],
+    ['a server error', () => Promise.resolve(new Response(null, { status: 500 }))],
+  ])('reconciles Start work after %s', async (_scenario, firstResult) => {
+    const next = {
+      ...base,
+      workStatus: 'in_progress' as const,
+      startedAt: '2026-07-11T12:01:00.000Z',
+      updatedAt: '2026-07-11T12:01:00.000Z',
+    }
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(firstResult)
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        workspace: next,
+        partRequests: [],
+      }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={base} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start work' }))
+
+    await screen.findByRole('heading', { name: 'Work in progress' })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `/api/tickets/${TICKET}/jobs/${JOB}/work`,
+      { method: 'GET', cache: 'no-store' },
+    )
+  })
+
+  it('keeps a detail draft when an ambiguous outcome still cannot be confirmed', async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('lost response'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ bad: true }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<SimpleWorkWorkspace
+      ticket={ticket}
+      initialWorkspace={{ ...base, workStatus: 'in_progress' }}
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add detail' }))
+    const detail = screen.getByRole('textbox', {
+      name: 'Anything worth recording? (optional)',
+    })
+    fireEvent.change(detail, { target: { value: 'My measured detail.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Complete with detail' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Couldn't confirm what happened",
+    )
+    expect(detail).toHaveValue('My measured detail.')
+  })
+
+  it('shows both local and server detail when the saved baseline changed elsewhere', async () => {
+    const localScope = {
+      actorProfileId: ACTOR,
+      ticketId: TICKET,
+      jobId: JOB,
+      workStatus: 'in_progress' as const,
+      authorization: 'approved' as const,
+      savedDetailBaseline: 'Original saved detail.',
+    }
+    const encoded = encodeSimpleWorkDraft(localScope, {
+      detail: 'My local detail.',
+      detailOpen: true,
+      concern: '',
+      tier: '',
+      parts: { description: '', preference: '', quantity: '1', requestKey: null },
+      hold: { kind: '', note: '' },
+    })
+    expect(encoded).not.toBeNull()
+    sessionStorage.setItem(simpleWorkDraftStorageKey(localScope), encoded as string)
+
+    render(<SimpleWorkWorkspace
+      actorProfileId={ACTOR}
+      ticket={ticket}
+      initialWorkspace={{
+        ...base,
+        workStatus: 'in_progress',
+        workNotes: 'Saved elsewhere.',
+      }}
+    />)
+
+    expect(await screen.findByText('Your detail')).toBeInTheDocument()
+    expect(screen.getByText('My local detail.')).toBeInTheDocument()
+    expect(screen.getByText('Saved elsewhere')).toBeInTheDocument()
+    expect(screen.getByText('Saved elsewhere.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Use my detail' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Use saved detail' })).toBeEnabled()
   })
 
   it('shows the immutable approved scope before work actions without exposing prices', () => {
@@ -56,7 +283,7 @@ describe('simple work workspace', () => {
     await waitFor(() => expect(
       screen.getByRole('heading', { name: 'Exactly what is approved' }),
     ).toHaveFocus())
-    expect(screen.getByRole('button', { name: 'Clock on' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Start work' })).toBeEnabled()
   })
 
   it('restores the current technician draft after a reload without changing the repair-order route', async () => {
@@ -65,12 +292,13 @@ describe('simple work workspace', () => {
       actorProfileId: ACTOR,
       ticketId: TICKET,
       jobId: JOB,
-      workspaceUpdatedAt: workspace.updatedAt,
       workStatus: workspace.workStatus,
-      authorization: workspace.authorization,
+      authorization: 'approved' as const,
+      savedDetailBaseline: '',
     }
     const encoded = encodeSimpleWorkDraft(scope, {
-      note: 'Front-left bolts are ready for final torque.',
+      detail: 'Front-left bolts are ready for final torque.',
+      detailOpen: true,
       concern: 'Rear brake squeal after road test',
       tier: '2',
       parts: { description: 'Pad hardware kit', preference: 'Motorcraft', quantity: '1', requestKey: REQUEST },
@@ -86,7 +314,7 @@ describe('simple work workspace', () => {
       embedded
     />)
 
-    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Work note' }))
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Anything worth recording? (optional)' }))
       .toHaveValue('Front-left bolts are ready for final torque.'))
     fireEvent.click(screen.getByText('Found another concern'))
     expect(screen.getByRole('textbox', { name: 'Concern' })).toHaveValue('Rear brake squeal after road test')
@@ -100,7 +328,7 @@ describe('simple work workspace', () => {
   it('renders distinct not-approved and declined states without mutation controls', () => {
     const { rerender } = render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{ ...base, authorization: 'awaiting_approval' }} />)
     expect(screen.getByRole('heading', { name: 'Work not approved' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Clock on' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Start work' })).toBeNull()
     rerender(<SimpleWorkWorkspace key="declined" ticket={ticket} initialWorkspace={{ ...base, authorization: 'declined' }} />)
     expect(screen.getByRole('heading', { name: 'Customer declined this work' })).toBeInTheDocument()
     expect(screen.queryByText('Waiting for customer approval')).toBeNull()
@@ -112,18 +340,18 @@ describe('simple work workspace', () => {
       initialWorkspace={{ ...base, kind: 'diagnostic', title: 'Brake squeal diagnosis' }}
     />)
     expect(screen.getByText('Diagnostic · assigned work')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Clock on' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Start work' })).toBeEnabled()
   })
 
   it('clocks on only after a strict confirmed server response', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true, status: 200,
-      json: async () => ({ changed: true, work: { status: 'in_progress', workNotes: null, startedAt: '2026-07-11T12:01:00.000Z', completedAt: null, clockedOnSince: '2026-07-11T12:01:00.000Z', activeSeconds: 0, updatedAt: '2026-07-11T12:01:00.000Z' } }),
+      json: async () => ({ changed: true, work: { status: 'in_progress', workNotes: null, startedAt: '2026-07-11T12:01:00.000Z', completedAt: null, clockedOnSince: '2026-07-11T12:01:00.000Z', activeSeconds: 0, updatedAt: '2026-07-11T12:01:00.000Z', timerEnabled: true } }),
     })
     vi.stubGlobal('fetch', fetchMock)
-    render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={base} />)
+    render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{ ...base, workStatus: 'in_progress', timerEnabled: true }} />)
     fireEvent.click(screen.getByRole('button', { name: 'Clock on' }))
-    await screen.findByRole('heading', { name: 'Work in progress' })
+    await screen.findByText(/Running since/)
     expect(fetchMock).toHaveBeenCalledWith(`/api/tickets/${TICKET}/jobs/${JOB}/work`, expect.objectContaining({
       method: 'POST', body: JSON.stringify({ action: 'clock_on' }),
     }))
@@ -134,7 +362,7 @@ describe('simple work workspace', () => {
     const onProjection = vi.fn()
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true, status: 200,
-      json: async () => ({ changed: true, work: { status: 'in_progress', workNotes: null, startedAt: '2026-07-11T12:01:00.000Z', completedAt: null, clockedOnSince: '2026-07-11T12:01:00.000Z', activeSeconds: 0, updatedAt: '2026-07-11T12:01:00.000Z' } }),
+      json: async () => ({ changed: true, work: { status: 'in_progress', workNotes: null, startedAt: '2026-07-11T12:01:00.000Z', completedAt: null, clockedOnSince: null, activeSeconds: 0, updatedAt: '2026-07-11T12:01:00.000Z', timerEnabled: false } }),
     }))
 
     render(<SimpleWorkWorkspace
@@ -147,7 +375,7 @@ describe('simple work workspace', () => {
 
     expect(screen.queryByText('Work order 000007')).toBeNull()
     expect(screen.queryByRole('link', { name: 'View repair order' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Clock on' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Start work' }))
     await screen.findByRole('heading', { name: 'Work in progress' })
     expect(onProjection).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'in_progress' }))
     fireEvent.click(screen.getByRole('button', { name: 'Close work' }))
@@ -163,24 +391,25 @@ describe('simple work workspace', () => {
       onClose={onClose}
     />)
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Work note' }), {
-      target: { value: 'Unsaved torque note' },
+    fireEvent.click(screen.getByRole('button', { name: 'Add detail' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Anything worth recording? (optional)' }), {
+      target: { value: 'Unsaved torque detail' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Close work' }))
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByRole('alert')).toHaveTextContent('Finish or clear the draft before closing work.')
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Work note' }), { target: { value: '' } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Anything worth recording? (optional)' }), { target: { value: '' } })
     fireEvent.change(screen.getByRole('textbox', { name: 'What part do you need?' }), {
       target: { value: 'Water pump' },
     })
-    expect(screen.getByRole('button', { name: 'Complete work' })).toBeDisabled()
-    expect(screen.getByText('Finish or clear what you started above first.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Complete as approved' })).toBeDisabled()
+    expect(screen.getByText('Finish or clear the parts draft before completing.')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Close work' }))
     expect(onClose).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Discard local draft' }))
-    expect(screen.getByRole('textbox', { name: 'Work note' })).toHaveValue('')
+    expect(screen.queryByRole('textbox', { name: 'Anything worth recording? (optional)' })).not.toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'What part do you need?' })).toHaveValue('')
     fireEvent.click(screen.getByRole('button', { name: 'Close work' }))
     expect(onClose).toHaveBeenCalledTimes(1)
@@ -210,27 +439,21 @@ describe('simple work workspace', () => {
     expect(within(holdForm).getByRole('button', { name: 'Put work on hold' })).toBeEnabled()
   })
 
-  it('enables completion immediately after the server confirms a non-empty saved note', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true, status: 200,
-      json: async () => ({ changed: true, work: { status: 'in_progress', workNotes: 'Installed and torqued.', startedAt: '2026-07-11T12:00:30.000Z', completedAt: null, clockedOnSince: '2026-07-11T12:00:30.000Z', activeSeconds: 0, updatedAt: '2026-07-11T12:02:00.000Z' } }),
-    })
-    vi.stubGlobal('fetch', fetchMock)
-    const inProgress = { ...base, workStatus: 'in_progress' as const }
-    const { unmount } = render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={inProgress} />)
-    expect(screen.getByRole('button', { name: 'Complete work' })).toBeDisabled()
-    fireEvent.change(screen.getByRole('textbox', { name: 'Work note' }), { target: { value: ' Installed and torqued. ' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save note' }))
-    await waitFor(() => expect(screen.getByText('Work note saved.')).toBeInTheDocument())
-    expect(screen.getByRole('button', { name: 'Complete work' })).toBeEnabled()
-    unmount()
+  it('keeps older saved detail without requiring it to be typed again', () => {
+    render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{
+      ...base,
+      workStatus: 'in_progress',
+      workNotes: 'Installed and torqued.',
+    }} />)
+    expect(screen.getByRole('button', { name: 'Complete as approved' })).toBeEnabled()
+    expect(screen.queryByRole('textbox', { name: 'Anything worth recording? (optional)' })).not.toBeInTheDocument()
   })
 
-  it('renders two text-only modules without media controls or copy', () => {
+  it('renders one calm work rail without media controls or required writing', () => {
     const { container } = render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{ ...base, workStatus: 'in_progress' }} />)
-    expect(screen.getByRole('heading', { name: 'Work note' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Complete work' })).toBeInTheDocument()
-    expect(screen.getByText('Save a work note first.')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Finish this job' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Complete as approved' })).toBeEnabled()
+    expect(container.textContent).not.toMatch(/\bnotes?\b/i)
     expect(container.querySelector('input[type="file"]')).toBeNull()
     expect(container.querySelector('[capture]')).toBeNull()
     expect(container.textContent).not.toMatch(/proof|photo|upload|filename|download/i)
@@ -264,7 +487,7 @@ describe('simple work workspace', () => {
   it('replaces stale mutation UI with ticket context after a not-found response', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404, json: async () => ({ error: 'not_found' }) }))
     render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={base} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Clock on' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Start work' }))
     await waitFor(() => expect(replaceMock).toHaveBeenCalledWith(`/tickets/${TICKET}`))
   })
 
@@ -284,14 +507,13 @@ describe('simple work workspace', () => {
       onStale={onStale}
     />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Clock on' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Start work' }))
 
     const staleHeading = await screen.findByRole('heading', { name: 'Work access changed' })
     expect(staleHeading).toHaveFocus()
     expect(onStale).toHaveBeenCalledTimes(1)
-    expect(screen.queryByRole('button', { name: 'Clock on' })).toBeNull()
-    expect(screen.queryByRole('heading', { name: 'Work note' })).toBeNull()
-    expect(screen.queryByRole('heading', { name: 'Complete work' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Start work' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Finish this job' })).toBeNull()
     expect(screen.queryByText('Put work on hold')).toBeNull()
     expect(screen.queryByText('Found another concern')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Send to parts' })).toBeNull()
@@ -344,14 +566,14 @@ describe('simple work workspace', () => {
     now.mockRestore()
   })
 
-  it('shows a paused total and a clock-back-on control while clocked off', () => {
+  it('shows a paused total and a clock-on control while clocked off', () => {
     render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{
-      ...base, workStatus: 'in_progress', clockedOnSince: null, activeSeconds: 8_100,
+      ...base, workStatus: 'in_progress', clockedOnSince: null, activeSeconds: 8_100, timerEnabled: true,
     }} />)
     const onJob = screen.getByText('On the job').closest('div') as HTMLElement
     expect(within(onJob).getByText('2h 15m')).toBeInTheDocument()
     expect(screen.getByText('Paused')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Clock back on' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Clock on' })).toBeInTheDocument()
   })
 
   it('puts work on a durable hold from the mounted work surface without losing a draft', async () => {
@@ -400,13 +622,14 @@ describe('simple work workspace', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
-  it('does not let a technician lose an unsaved note by putting work on hold', () => {
+  it('does not let a technician lose unsaved detail by putting work on hold', () => {
     render(<SimpleWorkWorkspace
       ticket={ticket}
       initialWorkspace={{ ...base, workStatus: 'in_progress' }}
       embedded
     />)
-    fireEvent.change(screen.getByRole('textbox', { name: 'Work note' }), {
+    fireEvent.click(screen.getByRole('button', { name: 'Add detail' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Anything worth recording? (optional)' }), {
       target: { value: 'Torque values are still unsaved.' },
     })
     fireEvent.click(screen.getAllByText('Put work on hold')[0])
@@ -414,7 +637,7 @@ describe('simple work workspace', () => {
     fireEvent.change(screen.getByLabelText('What needs to happen next?'), { target: { value: 'Awaiting clips.' } })
 
     expect(screen.getByRole('button', { name: 'Put work on hold' })).toBeDisabled()
-    expect(screen.getByText('Save or clear the open draft before placing work on hold.')).toBeInTheDocument()
+    expect(screen.getByText('Clear the open draft before placing work on hold.')).toBeInTheDocument()
   })
 
   it('protects long technician-controlled strings from narrow-screen overflow', () => {
