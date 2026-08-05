@@ -286,3 +286,8 @@ Reason: A mandatory utility adds friction and falsely defines the workflow aroun
 Trigger: A routine completion asks technicians to retype work already captured in the approved scope.
 Rule: Offer explicit Completed as approved; use free text only for optional detail or a deviation.
 Reason: Repeating known work makes completion painful without adding trustworthy information.
+
+### storage-language-must-not-reach-the-workflow
+Trigger: A founder asks what “notes” means after the product decision already made free text optional.
+Rule: Hide legacy storage names; say Complete as approved and Add detail everywhere the technician sees.
+Reason: Internal field vocabulary makes an optional escape hatch feel like mandatory paperwork.

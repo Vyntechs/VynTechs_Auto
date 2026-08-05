@@ -43,6 +43,7 @@ A technician can:
 - Office-only owners, advisors, and other non-wrenching people do not see the preference.
 - Routine completion reuses the approved work instead of requiring a note.
 - Extra work details are optional and internal.
+- The Work Rail never labels anything **note** or **work note**. Its only optional wording is **Add detail** and **Anything worth recording? (optional)**.
 - No typed detail may disappear because the clock changes, the page reloads, or the server response is ambiguous.
 - Today visibly settles completed work without a page jump.
 
@@ -157,13 +158,13 @@ The dominant finish action is **Complete as approved**. It means the technician 
 
 ### Add details and complete
 
-**Add details** reveals one bounded internal field labeled **Anything worth recording? (optional)**.
+**Add detail** reveals one bounded internal field labeled **Anything worth recording? (optional)**. The technician-facing surface never calls it a note.
 
 Examples include a result, exception, measurement, or useful handoff fact. It is not customer copy and is not required for ordinary work.
 
-- Empty details collapse back to **Complete as approved**.
+- Empty detail collapses back to **Complete as approved**.
 - Nonempty details normalize whitespace and allow 1–2,000 characters.
-- While a nonempty detail draft exists, the dominant button reads **Complete with details**. Clearing the draft deliberately restores **Complete as approved**.
+- While a nonempty detail draft exists, the dominant button reads **Complete with detail**. Clearing the draft deliberately restores **Complete as approved**.
 - One action stores the details and completes the job in the same transaction.
 - The interface never reports “details saved” while completion failed.
 - The completion confirmation names that details will be kept internally.
