@@ -295,3 +295,8 @@ Reason: Internal field vocabulary makes an optional escape hatch feel like manda
 Trigger: Reporting a commit hash to humans.
 Rule: Run `git rev-parse HEAD` immediately before publishing; copy the returned value verbatim.
 Reason: Guessed full hashes create false evidence even when the short prefix is right.
+
+### strict-contract-fixtures-need-full-sweep
+Trigger: A strict API response adds or removes a required field or action.
+Rule: Search every repository fixture and golden journey for the old envelope or action before the full suite.
+Reason: Three legacy fixtures and one golden flow escaped focused tests and caused five release-gate failures.

@@ -8,7 +8,7 @@ const JOB = '00000000-0000-4000-8000-000000000030'
 const workspace = {
   id: JOB, title: 'Install lift kit', kind: 'repair' as const, workStatus: 'open' as const,
   workNotes: null, startedAt: null, completedAt: null, clockedOnSince: null, activeSeconds: 0,
-  updatedAt: '2026-07-11T12:00:00.000Z', authorization: 'approved' as const,
+  updatedAt: '2026-07-11T12:00:00.000Z', timerEnabled: false, authorization: 'approved' as const,
   approvedScope: {
     authorizationPurpose: null,
     customerSuppliedPartsNote: null,
