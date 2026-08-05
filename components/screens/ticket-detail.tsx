@@ -160,6 +160,9 @@ export function TicketDetailScreen({
   const workOpenerRefs = useRef(new Map<string, HTMLButtonElement>())
   const correctionOpenerRefs = useRef(new Map<string, HTMLButtonElement>())
   const ringOutRef = useRef<HTMLElement>(null)
+  const customerCopyGenerationRef = useRef(0)
+  const customerCopyRequestRef = useRef(0)
+  const primaryGroupSignatureRef = useRef<string | null>(null)
   const approvalStateRef = useRef(new Map(
     ticket.jobs.map((job) => [job.id, job.approvalState]),
   ))
@@ -235,6 +238,7 @@ export function TicketDetailScreen({
     command.kind === 'ring_out' || command.kind === 'close'
   )) ?? null
   const commandProjectionSignature = `${commandSignature(commands)}|canBuildQuote:${String(canBuildQuote)}`
+  const primaryGroupCommandSignature = primaryGroupCommands.map(commandIdentity).join('|')
   const legacyQuoteFallback = !currentProfileId || !role
   const correctionAvailable = canCorrectTicket
     && canAssignWork(role)
@@ -243,9 +247,12 @@ export function TicketDetailScreen({
   const toolBlocked = activeTool !== null || lifecycleMutationActive
   const markCustomerCopyStale = useCallback(() => {
     if (!effectiveCustomerCopy) return
+    customerCopyGenerationRef.current += 1
+    customerCopyRequestRef.current += 1
     setCustomerCopyOpen(false)
     setCustomerCopyStale(true)
     setCustomerCopyError(false)
+    setCustomerCopyRefreshing(false)
   }, [effectiveCustomerCopy])
   const applyQuoteProjection = useCallback((projection: QuoteWorkspaceProjection) => {
     const preparedJob = projection.find((projected) => (
@@ -320,10 +327,13 @@ export function TicketDetailScreen({
   useEffect(() => setTicketStatus(ticket.status), [ticket.status])
   useEffect(() => setRingOutState(ringOut), [ringOut])
   useEffect(() => {
+    customerCopyGenerationRef.current += 1
+    customerCopyRequestRef.current += 1
     setEffectiveCustomerCopy(customerCopy)
     setCustomerCopyStale(false)
     setCustomerCopyError(false)
     setCustomerCopyOpen(false)
+    setCustomerCopyRefreshing(false)
   }, [customerCopy])
   useEffect(() => {
     approvalStateRef.current = new Map(ticket.jobs.map((job) => [job.id, job.approvalState]))
@@ -333,24 +343,33 @@ export function TicketDetailScreen({
     setConfirmedCorrection(null)
   }, [initialTicket])
   useEffect(() => {
+    const previousPrimaryGroupSignature = primaryGroupSignatureRef.current
+    const primaryGroupChanged = previousPrimaryGroupSignature !== null
+      && previousPrimaryGroupSignature !== primaryGroupCommandSignature
+    primaryGroupSignatureRef.current = primaryGroupCommandSignature
     setMoreOpen(false)
     setPrimaryGroupOpen(false)
     setSelectedPrimaryJobId((selected) => (
-      selected && primaryGroupCommands.length > 1
+      selected && !primaryGroupChanged && primaryGroupCommands.length > 1
         && primaryGroupCommands.some((command) => command.jobId === selected)
         ? selected
         : null
     ))
-  }, [commandProjectionSignature])
+  }, [commandProjectionSignature, primaryGroupCommandSignature])
 
   async function refreshStaleCustomerCopy(): Promise<void> {
     if (!customerCopyStale || customerCopyRefreshing) return
+    const generation = customerCopyGenerationRef.current
+    const requestId = customerCopyRequestRef.current + 1
+    customerCopyRequestRef.current = requestId
     setCustomerCopyRefreshing(true)
     setCustomerCopyError(false)
     try {
       const result = refreshCustomerCopyAction
         ? await refreshCustomerCopyAction(ticket.id)
         : null
+      if (customerCopyGenerationRef.current !== generation
+        || customerCopyRequestRef.current !== requestId) return
       if (!isCustomerCopySuccess(result)) {
         setCustomerCopyError(true)
         return
@@ -359,9 +378,10 @@ export function TicketDetailScreen({
       setCustomerCopyStale(false)
       setCustomerCopyOpen(true)
     } catch {
-      setCustomerCopyError(true)
+      if (customerCopyGenerationRef.current === generation
+        && customerCopyRequestRef.current === requestId) setCustomerCopyError(true)
     } finally {
-      setCustomerCopyRefreshing(false)
+      if (customerCopyRequestRef.current === requestId) setCustomerCopyRefreshing(false)
     }
   }
 
@@ -955,52 +975,54 @@ export function TicketDetailScreen({
                   <CorrectionConfirmationView
                     confirmation={confirmationFor(confirmedCorrection, correctionTarget)}
                   />
-                  {activeTool === null && currentProfileId && assignmentCommandFor(visibleCommands, job.id) && (
-                    <TicketAssignmentControl
-                      ticketId={ticket.id}
-                      job={{
-                        id: job.id,
-                        requiredSkillTier: job.requiredSkillTier,
-                        workStatus: job.workStatus as 'open' | 'in_progress' | 'blocked',
-                        approvalState: job.approvalState,
-                        hasAssignee: assignmentOverrides.has(job.id)
-                          ? assignmentOverrides.get(job.id)?.assignedTechId !== null
-                          : job.assignedTechId !== null,
-                      }}
-                      command={assignmentCommandFor(visibleCommands, job.id)!}
-                      team={team}
-                      currentProfileId={currentProfileId}
-                      onApplied={(assignment) => {
-                        const selected = team.find((member) => member.id === assignment.assignedTechId)
-                        const assignedTechName = assignment.assignedTechName
-                          ?? (assignment.state === 'mine' ? currentProfileName : selected?.name)
-                          ?? null
-                        setAssignmentOverrides((current) => new Map(current).set(job.id, {
-                          state: assignment.state,
-                          assignedTechId: assignment.assignedTechId,
-                          assignedTechName,
-                          workStatus: assignment.workStatus,
-                          approvalState: assignment.approvalState,
-                          notice: assignment.state === 'unassigned'
-                            ? 'Work is open.'
-                            : assignment.state === 'mine'
-                              ? 'Work is yours.'
-                              : `Assigned to ${assignedTechName ?? 'the selected technician'}.`,
-                        }))
-                        setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
-                      }}
-                      onConflict={({ assignedTechName }) => {
-                        setAssignmentOverrides((current) => new Map(current).set(job.id, {
-                          state: 'team',
-                          assignedTechId: null,
-                          assignedTechName,
-                          workStatus: 'open',
+                  {currentProfileId && assignmentCommandFor(projectedCommands, job.id) && (
+                    <div hidden={activeTool !== null}>
+                      <TicketAssignmentControl
+                        ticketId={ticket.id}
+                        job={{
+                          id: job.id,
+                          requiredSkillTier: job.requiredSkillTier,
+                          workStatus: job.workStatus as 'open' | 'in_progress' | 'blocked',
                           approvalState: job.approvalState,
-                          notice: `${assignedTechName} claimed it first. The repair order is current.`,
-                        }))
-                        setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
-                      }}
-                    />
+                          hasAssignee: assignmentOverrides.has(job.id)
+                            ? assignmentOverrides.get(job.id)?.assignedTechId !== null
+                            : job.assignedTechId !== null,
+                        }}
+                        command={assignmentCommandFor(projectedCommands, job.id)!}
+                        team={team}
+                        currentProfileId={currentProfileId}
+                        onApplied={(assignment) => {
+                          const selected = team.find((member) => member.id === assignment.assignedTechId)
+                          const assignedTechName = assignment.assignedTechName
+                            ?? (assignment.state === 'mine' ? currentProfileName : selected?.name)
+                            ?? null
+                          setAssignmentOverrides((current) => new Map(current).set(job.id, {
+                            state: assignment.state,
+                            assignedTechId: assignment.assignedTechId,
+                            assignedTechName,
+                            workStatus: assignment.workStatus,
+                            approvalState: assignment.approvalState,
+                            notice: assignment.state === 'unassigned'
+                              ? 'Work is open.'
+                              : assignment.state === 'mine'
+                                ? 'Work is yours.'
+                                : `Assigned to ${assignedTechName ?? 'the selected technician'}.`,
+                          }))
+                          setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
+                        }}
+                        onConflict={({ assignedTechName }) => {
+                          setAssignmentOverrides((current) => new Map(current).set(job.id, {
+                            state: 'team',
+                            assignedTechId: null,
+                            assignedTechName,
+                            workStatus: 'open',
+                            approvalState: job.approvalState,
+                            notice: `${assignedTechName} claimed it first. The repair order is current.`,
+                          }))
+                          setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
+                        }}
+                      />
+                    </div>
                   )}
                   {assignmentOverrides.get(job.id)?.notice && (
                     <p className={styles.assignmentNotice} role="status" aria-live="polite">
@@ -1364,41 +1386,63 @@ function quoteCommandFor(
 function isCustomerCopySuccess(
   result: unknown,
 ): result is { ok: true; copy: CustomerCopyProjection } {
-  if (!isRecord(result) || result.ok !== true || !isRecord(result.copy)) return false
+  if (!isRecord(result)
+    || !hasExactKeys(result, ['ok', 'copy'])
+    || result.ok !== true
+    || !isRecord(result.copy)) return false
   const copy = result.copy
-  if (!['estimate', 'invoice', 'paid_receipt'].includes(String(copy.documentKind))
+  if (!hasExactKeys(copy, [
+    'documentKind', 'readyToPrint', 'blockers', 'shop', 'ticketNumber', 'customer',
+    'vehicle', 'jobs', 'decisions', 'totals', 'closedAt',
+  ])
+    || !['estimate', 'invoice', 'paid_receipt'].includes(String(copy.documentKind))
     || typeof copy.readyToPrint !== 'boolean'
-    || !Array.isArray(copy.blockers) || !copy.blockers.every((value) => (
+    || !Array.isArray(copy.blockers)
+    || !copy.blockers.every((value) => (
       ['shop_phone', 'shop_address_line_1', 'shop_city', 'shop_region', 'shop_postal_code', 'pricing_unavailable']
         .includes(String(value))
     ))
-    || !isRecord(copy.shop) || typeof copy.shop.name !== 'string'
-    || !(copy.shop.phone === null || typeof copy.shop.phone === 'string')
-    || !Array.isArray(copy.shop.address) || !copy.shop.address.every((value) => typeof value === 'string')
-    || !Number.isInteger(copy.ticketNumber)
-    || !isRecord(copy.customer) || typeof copy.customer.name !== 'string'
-    || !isRecord(copy.vehicle) || !Number.isInteger(copy.vehicle.year)
-    || typeof copy.vehicle.make !== 'string' || typeof copy.vehicle.model !== 'string'
-    || !(copy.vehicle.vin === null || typeof copy.vehicle.vin === 'string')
-    || !(copy.vehicle.odometer === null || Number.isInteger(copy.vehicle.odometer))
+    || new Set(copy.blockers).size !== copy.blockers.length
+    || copy.readyToPrint !== (copy.blockers.length === 0)
+    || !isCustomerCopyShop(copy.shop)
+    || !isSafeNonnegativeInteger(copy.ticketNumber)
+    || !isCustomerCopyCustomer(copy.customer)
+    || !isCustomerCopyVehicle(copy.vehicle)
     || !Array.isArray(copy.jobs) || !copy.jobs.every(isCustomerCopyJob)
     || !Array.isArray(copy.decisions) || !copy.decisions.every(isCustomerCopyDecision)
-    || !isRecord(copy.totals)
-    || !(copy.closedAt === null || typeof copy.closedAt === 'string')) return false
-  const totals = copy.totals
-  if (!(['subtotalCents', 'taxCents', 'totalCents', 'paidCents', 'balanceCents'] as const)
-    .every((key) => Number.isInteger(totals[key]))
-    || !Array.isArray(totals.payments)
-    || !totals.payments.every((payment) => (
-      isRecord(payment) && Number.isInteger(payment.amountCents)
-        && ['cash', 'card', 'check', 'other'].includes(String(payment.method))
-        && typeof payment.recordedAt === 'string'
-    ))) return false
-  return true
+    || !isCustomerCopyTotals(copy.totals)
+    || !(copy.closedAt === null || isExactIsoTimestamp(copy.closedAt))) return false
+  return !copy.blockers.includes('pricing_unavailable') || copy.jobs.length === 0
+}
+
+function isCustomerCopyShop(value: unknown): boolean {
+  return isRecord(value)
+    && hasExactKeys(value, ['name', 'phone', 'address'])
+    && typeof value.name === 'string'
+    && (value.phone === null || typeof value.phone === 'string')
+    && Array.isArray(value.address)
+    && value.address.every((line) => typeof line === 'string')
+}
+
+function isCustomerCopyCustomer(value: unknown): boolean {
+  return isRecord(value)
+    && hasExactKeys(value, ['name'])
+    && typeof value.name === 'string'
+}
+
+function isCustomerCopyVehicle(value: unknown): boolean {
+  return isRecord(value)
+    && hasExactKeys(value, ['year', 'make', 'model', 'vin', 'odometer'])
+    && isSafeNonnegativeInteger(value.year)
+    && typeof value.make === 'string'
+    && typeof value.model === 'string'
+    && (value.vin === null || typeof value.vin === 'string')
+    && (value.odometer === null || isSafeNonnegativeInteger(value.odometer))
 }
 
 function isCustomerCopyJob(value: unknown): boolean {
   return isRecord(value)
+    && hasExactKeys(value, ['title', 'kind', 'lines'])
     && typeof value.title === 'string'
     && ['diagnostic', 'repair', 'maintenance'].includes(String(value.kind))
     && Array.isArray(value.lines)
@@ -1408,22 +1452,82 @@ function isCustomerCopyJob(value: unknown): boolean {
 function isCustomerCopyLine(value: unknown): boolean {
   if (!isRecord(value)
     || typeof value.description !== 'string'
-    || !Number.isInteger(value.priceCents)
+    || !isSafeCents(value.priceCents)
     || typeof value.taxable !== 'boolean') return false
-  if (value.kind === 'part') return typeof value.quantity === 'string'
+  if (value.kind === 'part') return hasExactKeys(value, [
+    'kind', 'description', 'quantity', 'priceCents', 'taxable', 'partNumber', 'brand',
+  ])
+    && typeof value.quantity === 'string'
     && (value.partNumber === null || typeof value.partNumber === 'string')
     && (value.brand === null || typeof value.brand === 'string')
-  if (value.kind === 'labor') return typeof value.hours === 'string'
-    && (value.laborRateCents === null || Number.isInteger(value.laborRateCents))
+  if (value.kind === 'labor') return hasExactKeys(value, [
+    'kind', 'description', 'hours', 'priceCents', 'taxable', 'laborRateCents',
+  ])
+    && typeof value.hours === 'string'
+    && (value.laborRateCents === null || isSafeCents(value.laborRateCents))
   return value.kind === 'fee'
+    && hasExactKeys(value, ['kind', 'description', 'priceCents', 'taxable'])
 }
 
 function isCustomerCopyDecision(value: unknown): boolean {
   return isRecord(value)
+    && hasExactKeys(value, ['jobTitle', 'decision', 'method', 'recordedAt'])
     && typeof value.jobTitle === 'string'
     && ['approved', 'declined', 'deferred'].includes(String(value.decision))
     && (value.method === null || ['phone', 'in_person'].includes(String(value.method)))
-    && typeof value.recordedAt === 'string'
+    && isExactIsoTimestamp(value.recordedAt)
+}
+
+function isCustomerCopyTotals(value: unknown): boolean {
+  if (!isRecord(value)
+    || !hasExactKeys(value, [
+      'subtotalCents', 'taxCents', 'totalCents', 'payments', 'paidCents', 'balanceCents',
+    ])
+    || !isSafeCents(value.subtotalCents)
+    || !isSafeCents(value.taxCents)
+    || !isSafeCents(value.totalCents)
+    || !isSafeCents(value.paidCents)
+    || !isSafeCents(value.balanceCents)
+    || !Array.isArray(value.payments)) return false
+  if (value.subtotalCents + value.taxCents !== value.totalCents
+    || value.totalCents - value.paidCents !== value.balanceCents) return false
+  let paymentTotal = 0
+  for (const payment of value.payments) {
+    if (!isCustomerCopyPayment(payment)) return false
+    paymentTotal += payment.amountCents
+    if (!Number.isSafeInteger(paymentTotal)) return false
+  }
+  return paymentTotal === value.paidCents
+}
+
+function isCustomerCopyPayment(
+  value: unknown,
+): value is CustomerCopyProjection['totals']['payments'][number] {
+  return isRecord(value)
+    && hasExactKeys(value, ['amountCents', 'method', 'recordedAt'])
+    && isSafeCents(value.amountCents)
+    && ['cash', 'card', 'check', 'other'].includes(String(value.method))
+    && isExactIsoTimestamp(value.recordedAt)
+}
+
+function isSafeCents(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function isSafeNonnegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function isExactIsoTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  const parsed = new Date(value)
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString() === value
+}
+
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(value)
+  return actual.length === keys.length
+    && keys.every((key) => Object.prototype.hasOwnProperty.call(value, key))
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

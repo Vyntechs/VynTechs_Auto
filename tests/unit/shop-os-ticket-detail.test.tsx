@@ -1,11 +1,55 @@
-import { render, screen, within } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TicketDetailScreen } from '@/components/screens/ticket-detail'
+import type { CustomerCopyProjection, CustomerCopyResult } from '@/lib/shop-os/customer-copy'
 import type { TicketDetail } from '@/lib/tickets'
 import { customerCopyFixture } from '@/tests/helpers/customer-copy'
+
+const refreshedCustomerCopyFixture: CustomerCopyProjection = {
+  ...customerCopyFixture,
+  documentKind: 'estimate',
+  totals: {
+    ...customerCopyFixture.totals,
+    payments: [{
+      amountCents: 17_250,
+      method: 'card',
+      recordedAt: '2026-08-01T14:00:00.000Z',
+    }],
+    paidCents: 17_250,
+    balanceCents: 12_300,
+  },
+}
+
+const malformedCustomerCopies: Array<[string, unknown]> = [
+  ['extra keys', { ...customerCopyFixture, unexpected: true }],
+  ['invalid timestamps', {
+    ...customerCopyFixture,
+    decisions: [{ ...customerCopyFixture.decisions[0], recordedAt: 'yesterday' }],
+  }],
+  ['unsafe cents', {
+    ...customerCopyFixture,
+    totals: { ...customerCopyFixture.totals, subtotalCents: Number.MAX_SAFE_INTEGER + 1 },
+  }],
+  ['negative cents', {
+    ...customerCopyFixture,
+    jobs: [{
+      ...customerCopyFixture.jobs[0],
+      lines: [{ ...customerCopyFixture.jobs[0].lines[0], priceCents: -1 }],
+    }],
+  }],
+  ['inconsistent payment totals', {
+    ...customerCopyFixture,
+    totals: { ...customerCopyFixture.totals, paidCents: 4_000, balanceCents: 25_550 },
+  }],
+  ['contradictory print readiness', {
+    ...customerCopyFixture,
+    readyToPrint: true,
+    blockers: ['shop_phone'],
+  }],
+]
 
 const { routerRefreshMock } = vi.hoisted(() => ({ routerRefreshMock: vi.fn() }))
 
@@ -299,12 +343,10 @@ describe('TicketDetailScreen', () => {
 
   it('fails stale Customer Copy closed until an explicit validated refresh succeeds', async () => {
     const user = userEvent.setup()
-    const freshCopy = {
-      ...customerCopyFixture,
-      documentKind: 'estimate' as const,
-      totals: { ...customerCopyFixture.totals, balanceCents: 12_300 },
-    }
-    const refreshCustomerCopyAction = vi.fn(async () => ({ ok: true as const, copy: freshCopy }))
+    const refreshCustomerCopyAction = vi.fn(async () => ({
+      ok: true as const,
+      copy: refreshedCustomerCopyFixture,
+    }))
     render(<TicketDetailScreen
       ticket={ticket({ jobs: [job({ assignedTechId: 'advisor-1' })] })}
       role="advisor"
@@ -360,6 +402,64 @@ describe('TicketDetailScreen', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Customer copy could not be refreshed')
     expect(screen.queryByRole('region', { name: 'Customer copy preview' })).toBeNull()
     expect(routerRefreshMock).not.toHaveBeenCalled()
+  })
+
+  it.each(malformedCustomerCopies)(
+    'rejects a Customer Copy success projection with %s',
+    async (_caseName, malformedCopy) => {
+      const user = userEvent.setup()
+      const refreshCustomerCopyAction = vi.fn(async () => ({ ok: true, copy: malformedCopy }))
+      render(<TicketDetailScreen
+        ticket={ticket({ jobs: [job({ assignedTechId: 'advisor-1' })] })}
+        role="advisor"
+        canBuildQuote
+        currentProfileId="advisor-1"
+        customerCopy={customerCopyFixture}
+        refreshCustomerCopyAction={refreshCustomerCopyAction as unknown as (
+          ticketId: string,
+        ) => Promise<CustomerCopyResult>}
+      />)
+
+      const jobRow = screen.getByRole('heading', { name: 'Diagnose brake vibration' }).closest('li')!
+      await user.click(within(jobRow).getByRole('button', { name: 'Build ticket' }))
+      await user.click(screen.getByRole('button', { name: 'Publish quote state' }))
+      await user.click(screen.getByRole('button', { name: 'Refresh customer copy' }))
+
+      expect(screen.getByRole('alert')).toHaveTextContent('Customer copy could not be refreshed')
+      expect(screen.queryByRole('region', { name: 'Customer copy preview' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Print customer copy' })).toBeNull()
+      expect(screen.getByRole('button', { name: 'Refresh customer copy' })).toBeEnabled()
+    },
+  )
+
+  it('ignores a late Customer Copy refresh after a newer financial invalidation', async () => {
+    const user = userEvent.setup()
+    let resolveRefresh!: (result: CustomerCopyResult) => void
+    const refreshCustomerCopyAction = vi.fn(() => new Promise<CustomerCopyResult>((resolve) => {
+      resolveRefresh = resolve
+    }))
+    render(<TicketDetailScreen
+      ticket={ticket({ jobs: [job({ assignedTechId: 'advisor-1' })] })}
+      role="advisor"
+      canBuildQuote
+      currentProfileId="advisor-1"
+      customerCopy={customerCopyFixture}
+      refreshCustomerCopyAction={refreshCustomerCopyAction}
+    />)
+
+    const jobRow = screen.getByRole('heading', { name: 'Diagnose brake vibration' }).closest('li')!
+    await user.click(within(jobRow).getByRole('button', { name: 'Build ticket' }))
+    await user.click(screen.getByRole('button', { name: 'Publish quote state' }))
+    await user.click(screen.getByRole('button', { name: 'Refresh customer copy' }))
+    await user.click(screen.getByRole('button', { name: 'Record approval' }))
+    await user.click(screen.getByRole('button', { name: 'Publish approval state' }))
+    await user.click(screen.getByRole('button', { name: 'Close quote' }))
+
+    await act(async () => resolveRefresh({ ok: true, copy: refreshedCustomerCopyFixture }))
+
+    expect(screen.queryByRole('region', { name: 'Customer copy preview' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Print customer copy' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Refresh customer copy' })).toBeEnabled()
   })
 
   it('renders a complete counter ticket from the safe projection with real links', () => {
@@ -552,6 +652,32 @@ describe('TicketDetailScreen', () => {
     expect(screen.queryByRole('link', { name: 'Open work' })).toBeNull()
   })
 
+  it('preserves an open assignment confirmation while the competing quote tool opens and closes', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    render(<TicketDetailScreen
+      ticket={ticket({ jobs: [job({ requiredSkillTier: 3 })] })}
+      team={[{ id: 'tech-1', name: 'Casey Climber', skillTier: 2, isCurrentUser: false }]}
+      canBuildQuote
+      currentProfileId="advisor-1"
+      role="advisor"
+    />)
+
+    await user.click(screen.getByRole('button', { name: 'Assign work' }))
+    await user.click(screen.getByRole('button', { name: /Casey Climber.*B-tech/i }))
+    expect(screen.getByRole('group', { name: 'Below-tier confirmation' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'More' }))
+    await user.click(screen.getByRole('button', { name: 'Build ticket' }))
+    expect(screen.getByRole('region', { name: 'Quote for this repair order' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Close quote' }))
+
+    expect(screen.getByRole('group', { name: 'Below-tier confirmation' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Assign anyway' })).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('resolves tied best jobs locally, focuses the selection, and resets stale selection', async () => {
     const user = userEvent.setup()
     const fetchMock = vi.fn()
@@ -581,8 +707,22 @@ describe('TicketDetailScreen', () => {
 
     view.rerender(<TicketDetailScreen
       ticket={ticket({ jobs: [
-        job({ id: 'job-3', title: 'Inspect rear brakes' }),
-        job({ id: 'job-4', title: 'Replace rear pads', kind: 'repair' }),
+        job({ id: 'job-1', title: 'Diagnose brake vibration' }),
+        job({ id: 'job-3', title: 'Inspect rear brakes', kind: 'repair' }),
+      ] })}
+      canBuildQuote
+      currentProfileId="parts-1"
+      role="parts"
+    />)
+
+    expect(await screen.findByRole('button', { name: '2 jobs need attention' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Build ticket' })).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    view.rerender(<TicketDetailScreen
+      ticket={ticket({ jobs: [
+        job({ id: 'job-4', title: 'Inspect rear brakes' }),
+        job({ id: 'job-5', title: 'Replace rear pads', kind: 'repair' }),
       ] })}
       canBuildQuote
       currentProfileId="parts-1"
