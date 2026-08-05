@@ -105,8 +105,14 @@ export type LivingTicketCommand = {
   jobId?: string
 }
 
+export type LivingTicketCommandGroup = {
+  label: string
+  commands: LivingTicketCommand[]
+}
+
 export type LivingTicketCommands = {
   primary: LivingTicketCommand | null
+  primaryGroup: LivingTicketCommandGroup | null
   secondary: LivingTicketCommand[]
 }
 
@@ -171,25 +177,38 @@ function technicianReadiness(
   })
 }
 
-function quoteCommand(input: Input, activeJobs: LivingTicketJob[]): RankedCommand | null {
-  if (input.role === 'tech' || !canBuildQuotes(input.role)) return null
-  const needsDraft = activeJobs.some((job) => job.approvalState === 'pending_quote')
-  if (needsDraft) return { kind: 'quote', label: 'Build quote', rank: 30 }
+function quoteCommands(input: Input, activeJobs: LivingTicketJob[]): RankedCommand[] {
+  if (!canBuildQuotes(input.role)) return []
+
+  const buildable = activeJobs.filter((job) => (
+    job.approvalState === 'pending_quote'
+      && (input.role !== 'tech' || assignmentState(job, input.profileId!) === 'mine')
+  ))
+  if (buildable.length > 0) {
+    return buildable.map((job) => ({
+      kind: 'quote' as const,
+      jobId: job.id,
+      label: 'Build ticket',
+      rank: 30,
+    }))
+  }
+
+  if (input.role === 'tech') return []
 
   const awaitsDecision = activeJobs.some((job) => (
     job.approvalState === 'quote_ready' || job.approvalState === 'sent' || job.approvalState === 'deferred'
   ))
-  if (!awaitsDecision) return null
-  return {
+  if (!awaitsDecision) return []
+  return [{
     kind: 'quote',
     label: canCloseTickets(input.role) ? 'Record approval' : 'View quote',
     rank: 30,
-  }
+  }]
 }
 
 export function projectLivingTicketCommands(input: Input): LivingTicketCommands {
   if (input.ticketStatus !== 'open' || !input.profileId || !isShopRole(input.role)) {
-    return { primary: null, secondary: [] }
+    return { primary: null, primaryGroup: null, secondary: [] }
   }
 
   const commands: RankedCommand[] = []
@@ -263,8 +282,7 @@ export function projectLivingTicketCommands(input: Input): LivingTicketCommands 
     }
   }
 
-  const quote = quoteCommand(input, activeJobs)
-  if (quote) commands.push(quote)
+  commands.push(...quoteCommands(input, activeJobs))
 
   const allWorkTerminal = input.jobs.length > 0 && input.jobs.every((job) => (
     job.workStatus === 'done' || job.workStatus === 'canceled'
@@ -276,9 +294,29 @@ export function projectLivingTicketCommands(input: Input): LivingTicketCommands 
   }
 
   commands.sort((left, right) => left.rank - right.rank)
+  const bestRank = commands[0]?.rank
+  const bestRanked = bestRank === undefined
+    ? []
+    : commands.filter((command) => command.rank === bestRank)
+  const jobIds = bestRanked.map((command) => command.jobId)
+  const hasAmbiguousBestRank = bestRanked.length >= 2
+    && jobIds.every((jobId): jobId is string => jobId !== undefined)
+    && new Set(jobIds).size === bestRanked.length
+  if (hasAmbiguousBestRank) {
+    return {
+      primary: null,
+      primaryGroup: {
+        label: `${bestRanked.length} jobs need attention`,
+        commands: bestRanked.map(withoutRank),
+      },
+      secondary: commands.filter((command) => command.rank !== bestRank).map(withoutRank),
+    }
+  }
+
   const [primary, ...secondary] = commands
   return {
     primary: primary ? withoutRank(primary) : null,
+    primaryGroup: null,
     secondary: secondary.map(withoutRank),
   }
 }

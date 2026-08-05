@@ -196,6 +196,15 @@ describe('Golden Shop Day release gate', () => {
       expect(assignedTicket.ok).toBe(true)
       if (!assignedTicket.ok) throw new Error('assigned ticket unavailable')
       expect(commandKinds(golden.actors.tech, assignedTicket.ticket)).not.toContain('work')
+      expect(projectLivingTicketCommands({
+        role: golden.actors.tech.role,
+        profileId: golden.actors.tech.profileId,
+        skillTier: golden.actors.tech.skillTier,
+        ticketStatus: assignedTicket.ticket.status,
+        jobs: assignedTicket.ticket.jobs,
+        ringOut: null,
+        diagnosticsEntitled: false,
+      }).primary).toEqual({ kind: 'quote', jobId: job.id, label: 'Build ticket' })
       const assignedWork = await getSimpleWorkWorkspace(golden.db, {
         actor: { profileId: golden.people.tech.id, shopId: golden.shop.id },
         ticketId,
