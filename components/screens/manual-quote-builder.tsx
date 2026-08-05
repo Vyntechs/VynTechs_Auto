@@ -406,7 +406,7 @@ export function ManualQuoteBuilder({
 
   const lines = current.jobs.flatMap((job) => job.lines)
   const sourcingJob = sourcingJobId
-    ? current.jobs.find((job) => job.id === sourcingJobId) ?? null
+    ? current.jobs.find((job) => job.id === sourcingJobId && job.canEdit) ?? null
     : null
   const diagnosisSeed = selectLockedDiagnosisSeed(current.jobs)
   // A saved diagnostic is priced through Add diagnostic time, which writes it as
@@ -465,6 +465,7 @@ export function ManualQuoteBuilder({
 
   function requestEditor(target: EditorTarget, invoker: HTMLElement): void {
     if (inFlightRef.current || modal || sourcingJobId || prepareConfirmation) return
+    if (!current.jobs.some((job) => job.id === target.jobId && job.canEdit)) return
     if (editor?.dirty) {
       setModal({ kind: 'discard', target, invoker })
       return
@@ -764,6 +765,7 @@ export function ManualQuoteBuilder({
   async function submitEditor(event: React.FormEvent): Promise<void> {
     event.preventDefault()
     if (!editor || inFlightRef.current || conflictRecovery !== null) return
+    if (!current.jobs.some((job) => job.id === editor.jobId && job.canEdit)) return
     let line: Record<string, unknown>
     try {
       const laborRate = editor.mode === 'edit' && editor.line?.kind === 'labor'
@@ -850,6 +852,10 @@ export function ManualQuoteBuilder({
   async function confirmRemove(): Promise<void> {
     if (modal?.kind !== 'remove' || conflictRecovery !== null || !beginOperation('remove')) return
     const removeTarget = modal.target
+    if (!current.jobs.some((job) => job.id === removeTarget.jobId && job.canEdit)) {
+      endOperation()
+      return
+    }
     setError(null)
     try {
       const response = await fetch(
@@ -903,6 +909,10 @@ export function ManualQuoteBuilder({
   async function confirmSourcedRemove(): Promise<void> {
     if (modal?.kind !== 'remove-sourced' || !beginOperation('remove')) return
     const removeTarget = modal.target
+    if (!current.jobs.some((job) => job.id === removeTarget.jobId && job.canEdit)) {
+      endOperation()
+      return
+    }
     setError(null)
     try {
       const response = await fetch(
@@ -951,7 +961,7 @@ export function ManualQuoteBuilder({
   }
 
   function openPrepare(): void {
-    if (preparation.kind !== 'ready' || !current.draftCommitment
+    if (!current.capabilities.canPrepareQuote || preparation.kind !== 'ready' || !current.draftCommitment
       || inFlightRef.current || conflictRecovery !== null) return
     setError(null)
     setPrepareConfirmation({
@@ -966,7 +976,8 @@ export function ManualQuoteBuilder({
   }
 
   async function prepareQuote(): Promise<void> {
-    if (!prepareConfirmation || editor !== null || sourcingJob !== null || modal !== null
+    if (!current.capabilities.canPrepareQuote || !prepareConfirmation
+      || editor !== null || sourcingJob !== null || modal !== null
       || conflictRecovery !== null || !beginOperation('prepare')) return
     const pending = prepareConfirmation
     setError(null)
@@ -1533,7 +1544,7 @@ export function ManualQuoteBuilder({
                               </div>
                             </div>
                             <LineFacts line={line} />
-                            {line.mutable ? <div className={styles.lineControls}>
+                            {line.mutable && job.canEdit ? <div className={styles.lineControls}>
                               <button
                                 type="button"
                                 className={styles.lineAction}
@@ -1568,7 +1579,7 @@ export function ManualQuoteBuilder({
                             </div> : (
                               <div className={styles.lineControls}>
                                 <p className={styles.lineKind}>Sourced · read-only</p>
-                                {line.source === 'vendor_offer' && (
+                                {job.canEdit && line.source === 'vendor_offer' && (
                                   <button
                                     type="button"
                                     className={styles.lineAction}
@@ -1596,7 +1607,7 @@ export function ManualQuoteBuilder({
                         ))}
                       </ul>
                     )}
-                    <div className={styles.addActions}>
+                    {job.canEdit && <div className={styles.addActions}>
                       {(['part', 'labor', 'fee'] as const).map((kind) => {
                         const active = editor?.jobId === job.id
                           && editor.mode === 'create' && editor.kind === kind
@@ -1643,7 +1654,7 @@ export function ManualQuoteBuilder({
                           Source part
                         </button>
                       )}
-                    </div>
+                    </div>}
                     {editor?.jobId === job.id && (
                       <LineEditor
                         id={quoteEditorId(job.id)}

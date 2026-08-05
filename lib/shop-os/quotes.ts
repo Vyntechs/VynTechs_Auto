@@ -7,7 +7,12 @@ import {
   ticketJobs, tickets,
 } from '@/lib/db/schema'
 import { resolveShopEntitlements } from '@/lib/entitlements'
-import { canBuildQuotes, canRecordCustomerApproval } from '@/lib/shop-os/capabilities'
+import {
+  canBuildQuotes,
+  canEditQuoteJob,
+  canPrepareQuotes,
+  canRecordCustomerApproval,
+} from '@/lib/shop-os/capabilities'
 import {
   parsePersistedCustomerStory,
   parsePersistedCustomerStoryMeta,
@@ -170,6 +175,7 @@ export type QuoteBuilderResult =
         kind: 'diagnostic' | 'repair' | 'maintenance'
         customerSuppliedPartsNote?: string | null
         workStatus: 'open' | 'in_progress' | 'blocked'
+        canEdit: boolean
         story: {
           content: QuoteCustomerStoryV1 | null
           source: 'ai' | 'manual' | 'template' | null
@@ -194,6 +200,7 @@ export type QuoteBuilderResult =
         >
       }>
       capabilities: {
+        canPrepareQuote: boolean
         canRecordCustomerApproval: boolean
         canCreateCustomerApprovalLink?: boolean
       }
@@ -905,6 +912,9 @@ export async function getQuoteBuilder(
                 ? {}
                 : { customerSuppliedPartsNote: job.customerSuppliedPartsNote }),
               workStatus: job.workStatus as 'open' | 'in_progress' | 'blocked',
+              canEdit: !isPinnedSimpleWork(job)
+                && canEditQuoteJob(actor.role, actor.id, job.assignedTechId)
+                && (actor.role !== 'tech' || job.approvalState === 'pending_quote'),
               story: safeBuilderStory(job.customerStory, job.storyMeta),
               storyMode: storyMode(job),
               decisionEligible: activeSnapshot ? decisionJobEligible(activeSnapshot, job) : false,
@@ -921,6 +931,7 @@ export async function getQuoteBuilder(
                 .map(safeBuilderLine),
             })),
             capabilities: {
+              canPrepareQuote: canPrepareQuotes(actor.role),
               canRecordCustomerApproval: canRecordCustomerApproval(actor.role),
               canCreateCustomerApprovalLink:
                 canRecordCustomerApproval(actor.role) && isCustomerApprovalEnabled(),
@@ -997,7 +1008,14 @@ async function lockDraftContext(
   if (!ticket || ticket.status !== 'open') return null
 
   const jobRows = await db
-    .select({ id: ticketJobs.id, kind: ticketJobs.kind, workStatus: ticketJobs.workStatus, sessionId: ticketJobs.sessionId })
+    .select({
+      id: ticketJobs.id,
+      kind: ticketJobs.kind,
+      workStatus: ticketJobs.workStatus,
+      sessionId: ticketJobs.sessionId,
+      assignedTechId: ticketJobs.assignedTechId,
+      approvalState: ticketJobs.approvalState,
+    })
     .from(ticketJobs)
     .where(and(eq(ticketJobs.shopId, input.shopId), eq(ticketJobs.ticketId, input.ticketId)))
     .orderBy(ticketJobs.id)
@@ -1034,7 +1052,9 @@ async function lockDraftContext(
     ))
     .limit(1)
     .for('update', { noWait: true })
-  if (!freshActor || !canBuildQuotes(freshActor.role)) return null
+  if (!freshActor || !canBuildQuotes(freshActor.role)
+    || !canEditQuoteJob(freshActor.role, freshActor.id, targetJob.assignedTechId)
+    || (freshActor.role === 'tech' && targetJob.approvalState !== 'pending_quote')) return null
 
   const [shop] = await db
     .select({ laborRateCents: shops.laborRateCents })
@@ -1225,7 +1245,7 @@ async function lockVersionContext(
     ))
     .limit(1)
     .for('update', { noWait: true })
-  if (!actor || !canBuildQuotes(actor.role)) return null
+  if (!actor || !canPrepareQuotes(actor.role)) return null
   return { ticket, shop, jobs, lines, versions, actorId: actor.id }
 }
 

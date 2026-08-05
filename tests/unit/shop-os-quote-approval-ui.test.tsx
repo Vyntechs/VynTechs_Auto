@@ -24,8 +24,9 @@ function builder(
 ): Builder {
   return {
     ticket: { id: TICKET, status: 'open', reconciled: true }, configuration: { laborRateCents: 12000, taxRateBps: 825, partsMarkupBps: null, laborRateConfigured: true, taxRateConfigured: true },
-    jobs: [{ id: JOB, title: 'Front brake repair', kind: 'repair', workStatus: 'open', story: { content: null, source: null, reviewStatus: null, revision: 0 }, storyMode: null, decisionEligible: true, approval, lines: [] }],
+    jobs: [{ id: JOB, title: 'Front brake repair', kind: 'repair', workStatus: 'open', canEdit: true, story: { content: null, source: null, reviewStatus: null, revision: 0 }, storyMode: null, decisionEligible: true, approval, lines: [] }],
     capabilities: {
+      canPrepareQuote: true,
       canRecordCustomerApproval: canApprove,
       ...(canCreateCustomerApprovalLink ? { canCreateCustomerApprovalLink: true } : {}),
     },

@@ -95,6 +95,7 @@ function line(overrides: Partial<BuilderLine> = {}): BuilderLine {
 }
 
 const jobFacts = {
+  canEdit: true,
   story: { content: null, source: null, reviewStatus: null, revision: 0 },
   storyMode: null,
   decisionEligible: false,
@@ -163,7 +164,7 @@ function builder(overrides: Partial<Builder> = {}): Builder {
     ticket: { id: TICKET_ID, status: 'open', reconciled: true },
     configuration: selectedConfiguration,
     jobs: selectedJobs,
-    capabilities: { canRecordCustomerApproval: true },
+    capabilities: { canPrepareQuote: true, canRecordCustomerApproval: true },
     ...overrides,
     activeVersion: selectedActiveVersion,
     lastPreparedVersion: selectedLastPreparedVersion,
@@ -203,6 +204,7 @@ function reviewedDiagnosis(recommendation: string): Builder['jobs'][number] {
     title: 'Brake diagnosis',
     kind: 'diagnostic',
     workStatus: 'open',
+    canEdit: true,
     story: {
       content: {
         whatYouToldUs: 'The brakes vibrate.',
@@ -226,6 +228,7 @@ function diagnosticAuthorization(): Builder['jobs'][number] {
     title: 'Initial diagnosis',
     kind: 'diagnostic',
     workStatus: 'open',
+    canEdit: true,
     story: { content: null, source: null, reviewStatus: null, revision: 0 },
     storyMode: 'authorization_only',
     decisionEligible: false,
@@ -258,6 +261,33 @@ function capturedOfferResponse(lineId = SOURCED_LINE_ID) {
 }
 
 describe('ManualQuoteBuilder', () => {
+  it('shows every job but only the server-authorized job controls and never offers Prepare to a technician', () => {
+    const editable = builder({ activeVersion: null }).jobs[0]
+    const readOnlyLine = line({ id: SECOND_JOB_ID, description: 'Rear pad set' })
+    const readOnly = {
+      ...editable,
+      id: '00000000-0000-4000-8000-000000000206',
+      title: 'Replace rear brakes',
+      canEdit: false,
+      lines: [readOnlyLine],
+    }
+    render(<ManualQuoteBuilder
+      ticket={ticket}
+      builder={builder({
+        activeVersion: null,
+        jobs: [editable, readOnly],
+        capabilities: { canPrepareQuote: false, canRecordCustomerApproval: false },
+      })}
+    />)
+
+    const editableJob = screen.getByRole('heading', { name: 'Replace front brakes' }).closest('li')!
+    const readOnlyJob = screen.getByRole('heading', { name: 'Replace rear brakes' }).closest('li')!
+    expect(within(editableJob).getByRole('button', { name: 'Add part' })).toBeEnabled()
+    expect(within(readOnlyJob).getByText('Rear pad set')).toBeInTheDocument()
+    expect(within(readOnlyJob).queryAllByRole('button', { name: /Add part|Add labor|Add fee|Source part|Edit Rear pad set|Remove Rear pad set/i })).toHaveLength(0)
+    expect(screen.queryByRole('button', { name: /Prepare/i })).toBeNull()
+  })
+
   it('prepares diagnostic authorization without demanding findings before testing occurs', () => {
     render(<ManualQuoteBuilder
       ticket={ticket}

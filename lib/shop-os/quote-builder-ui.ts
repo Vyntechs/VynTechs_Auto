@@ -110,6 +110,7 @@ const quoteBuilderSchema = z.strictObject({
     kind: z.enum(['diagnostic', 'repair', 'maintenance']),
     customerSuppliedPartsNote: z.string().min(1).max(500).nullable().optional(),
     workStatus: z.enum(['open', 'in_progress', 'blocked']),
+    canEdit: z.boolean(),
     story: z.strictObject({
       content: customerStorySchema.nullable(),
       source: z.enum(['ai', 'manual', 'template']).nullable(),
@@ -142,6 +143,7 @@ const quoteBuilderSchema = z.strictObject({
     lines: z.array(builderLineSchema).max(2_000),
   })).max(500),
   capabilities: z.strictObject({
+    canPrepareQuote: z.boolean(),
     canRecordCustomerApproval: z.boolean(),
     canCreateCustomerApprovalLink: z.boolean().optional().default(false),
   }),

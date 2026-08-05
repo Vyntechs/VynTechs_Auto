@@ -64,6 +64,9 @@ describe('Shop OS manual offer mutations', () => {
       { id: uuid(1), userId: uuid(11), shopId, role: 'tech' },
       { id: uuid(3), userId: uuid(13), shopId, role: 'advisor' },
       { id: uuid(2), userId: uuid(12), shopId: otherShop.id, role: 'owner' },
+      { id: uuid(4), userId: uuid(14), shopId, role: 'tech' },
+      { id: uuid(5), userId: uuid(15), shopId, role: 'parts' },
+      { id: uuid(6), userId: uuid(16), shopId, role: 'owner' },
     ])
     actor = { profileId: uuid(1) }
     const [customer] = await db.insert(customers).values({
@@ -80,8 +83,10 @@ describe('Shop OS manual offer mutations', () => {
     })
     jobId = uuid(40)
     await db.insert(ticketJobs).values([
-      { id: jobId, shopId, ticketId, title: 'Front brakes', kind: 'repair', requiredSkillTier: 1 },
-      { id: uuid(41), shopId, ticketId, title: 'Rear brakes', kind: 'maintenance', requiredSkillTier: 1 },
+      { id: jobId, shopId, ticketId, title: 'Front brakes', kind: 'repair', requiredSkillTier: 1,
+        assignedTechId: uuid(1) },
+      { id: uuid(41), shopId, ticketId, title: 'Rear brakes', kind: 'maintenance', requiredSkillTier: 1,
+        assignedTechId: uuid(4) },
     ])
     accountId = uuid(50)
     await db.insert(vendorAccounts).values({
@@ -121,6 +126,57 @@ describe('Shop OS manual offer mutations', () => {
     expect(serialized).not.toContain('requestFingerprint')
     expect(serialized).not.toContain('nonSecretConfig')
     expect(serialized).not.toContain('secretRef')
+  })
+
+  it('enforces fresh technician assignment and pending-quote state before capture or removal', async () => {
+    const foreign = await captureManualOffer(db, {
+      actor: { profileId: uuid(3) }, ticketId, jobId: uuid(41),
+      body: body({ clientKey: uuid(110) }),
+    })
+    expect(foreign).toMatchObject({ ok: true, changed: true })
+    if (!foreign.ok || !('line' in foreign) || !foreign.line) {
+      throw new Error('foreign offer fixture failed')
+    }
+    const foreignLine = foreign.line
+    const [version] = await db.insert(quoteVersions).values({
+      shopId, ticketId, versionNumber: 1, snapshot: snapshot(), createdByProfileId: uuid(3),
+    }).returning()
+
+    await expect(captureManualOffer(db, {
+      actor, ticketId, jobId: uuid(41), body: body({ clientKey: uuid(111) }),
+    })).resolves.toEqual({ ok: false, error: 'not_found' })
+    await expect(removeManualOffer(db, {
+      actor, ticketId, jobId: uuid(41), lineId: foreignLine.id,
+    })).resolves.toEqual({ ok: false, error: 'not_found' })
+    expect(await db.select().from(jobLines).where(eq(jobLines.id, foreignLine.id))).toHaveLength(1)
+    expect((await db.select().from(quoteVersions).where(eq(quoteVersions.id, version.id)))[0].supersededAt)
+      .toBeNull()
+
+    for (const [index, approvalState] of ['quote_ready', 'sent', 'approved', 'declined', 'deferred']
+      .entries()) {
+      await db.update(ticketJobs).set({ approvalState: approvalState as never }).where(eq(ticketJobs.id, jobId))
+      await expect(capture({ clientKey: uuid(120 + index) }))
+        .resolves.toEqual({ ok: false, error: 'not_found' })
+    }
+    await db.update(ticketJobs).set({ approvalState: 'pending_quote', assignedTechId: null })
+      .where(eq(ticketJobs.id, jobId))
+    await expect(capture({ clientKey: uuid(126) })).resolves.toEqual({ ok: false, error: 'not_found' })
+  })
+
+  it('keeps advisor, parts, and owner cross-job sourcing across every current approval state', async () => {
+    const roles = [uuid(3), uuid(5), uuid(6)]
+    const states = ['pending_quote', 'quote_ready', 'sent', 'approved', 'declined', 'deferred'] as const
+    let key = 200
+    for (const profileId of roles) {
+      for (const approvalState of states) {
+        await db.update(ticketJobs).set({ approvalState }).where(eq(ticketJobs.id, uuid(41)))
+        await expect(captureManualOffer(db, {
+          actor: { profileId }, ticketId, jobId: uuid(41),
+          body: body({ clientKey: uuid(key), description: `${profileId}:${approvalState}` }),
+        })).resolves.toMatchObject({ ok: true, changed: true })
+        key += 1
+      }
+    }
   })
 
   it('authorizes before exact replay and replays before current account state or quote invalidation', async () => {

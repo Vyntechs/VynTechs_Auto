@@ -104,7 +104,7 @@ const builder = {
     laborRateCents: 12500, taxRateBps: 825,
     partsMarkupBps: null, laborRateConfigured: true, taxRateConfigured: true,
   },
-  jobs: [], capabilities: { canRecordCustomerApproval: true }, activeVersion: null,
+  jobs: [], capabilities: { canPrepareQuote: true, canRecordCustomerApproval: true }, activeVersion: null,
   lastPreparedVersion: null, draftCommitment: null,
 } satisfies QuoteBuilder
 const props = () => ({ params: Promise.resolve({ id: ticketId }) })
@@ -173,6 +173,39 @@ describe('QuotePage', () => {
       cannedJobs: [], cannedCatalogAvailable: true,
       vendorAccounts: [safeAccount], vendorCatalogAvailable: true,
       canCreateVendorAccount: false,
+    })
+  })
+
+  it('passes the technician fallback every visible job with strict server edit and Prepare truth', async () => {
+    requireUserMock.mockResolvedValue({
+      ...context,
+      profile: { ...profile, role: 'tech' },
+    })
+    const technicianBuilder: QuoteBuilder = {
+      ...builder,
+      jobs: [{
+        id: '00000000-0000-4000-8000-000000000601', title: 'Front brakes', kind: 'repair',
+        workStatus: 'open', canEdit: true,
+        story: { content: null, source: null, reviewStatus: null, revision: 0 }, storyMode: null,
+        decisionEligible: false, approval: { state: 'pending_quote', quoteVersionId: null }, lines: [],
+      }, {
+        id: '00000000-0000-4000-8000-000000000602', title: 'Rear brakes', kind: 'repair',
+        workStatus: 'open', canEdit: false,
+        story: { content: null, source: null, reviewStatus: null, revision: 0 }, storyMode: null,
+        decisionEligible: false, approval: { state: 'pending_quote', quoteVersionId: null }, lines: [],
+      }],
+      capabilities: { canPrepareQuote: false, canRecordCustomerApproval: false },
+    }
+    getBuilderMock.mockResolvedValue({ ok: true, builder: technicianBuilder })
+
+    render(await QuotePage(props()))
+
+    expect(manualBuilderMock.mock.calls[0][0].builder).toMatchObject({
+      jobs: [
+        { title: 'Front brakes', canEdit: true },
+        { title: 'Rear brakes', canEdit: false },
+      ],
+      capabilities: { canPrepareQuote: false },
     })
   })
 

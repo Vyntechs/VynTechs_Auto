@@ -18,6 +18,20 @@ export function canBuildQuotes(role: string | null | undefined): boolean {
   return isShopRole(role)
 }
 
+export function canEditQuoteJob(
+  role: string | null | undefined,
+  actorProfileId: string | null | undefined,
+  assignedTechId: string | null | undefined,
+): boolean {
+  if (!isShopRole(role)) return false
+  return role !== 'tech'
+    || (typeof actorProfileId === 'string' && actorProfileId === assignedTechId)
+}
+
+export function canPrepareQuotes(role: string | null | undefined): boolean {
+  return role === 'advisor' || role === 'parts' || role === 'owner'
+}
+
 export function canSendQuotes(role: string | null | undefined): boolean {
   return role === 'advisor' || role === 'owner'
 }

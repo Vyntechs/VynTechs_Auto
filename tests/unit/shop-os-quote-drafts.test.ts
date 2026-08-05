@@ -71,6 +71,10 @@ describe('Shop OS quote draft mutations', () => {
       { id: uuid(1), userId: uuid(11), shopId, role: 'tech' },
       { id: uuid(2), userId: uuid(12), shopId: otherShopId, role: 'owner' },
       { id: uuid(3), userId: uuid(13), shopId, role: 'founder' },
+      { id: uuid(4), userId: uuid(14), shopId, role: 'tech' },
+      { id: uuid(5), userId: uuid(15), shopId, role: 'advisor' },
+      { id: uuid(6), userId: uuid(16), shopId, role: 'parts' },
+      { id: uuid(7), userId: uuid(17), shopId, role: 'owner' },
     ])
     actor = { profileId: uuid(1) }
     await db.insert(tickets).values({
@@ -84,8 +88,10 @@ describe('Shop OS quote draft mutations', () => {
     })
     otherTicketId = uuid(21)
     await db.insert(ticketJobs).values([
-      { id: uuid(30), shopId, ticketId, title: 'Front brakes', kind: 'repair', requiredSkillTier: 1 },
-      { id: uuid(31), shopId, ticketId, title: 'Rear brakes', kind: 'repair', requiredSkillTier: 1 },
+      { id: uuid(30), shopId, ticketId, title: 'Front brakes', kind: 'repair', requiredSkillTier: 1,
+        assignedTechId: uuid(1) },
+      { id: uuid(31), shopId, ticketId, title: 'Rear brakes', kind: 'repair', requiredSkillTier: 1,
+        assignedTechId: uuid(4) },
     ])
     jobId = uuid(30)
     excludedJobId = uuid(31)
@@ -136,6 +142,60 @@ describe('Shop OS quote draft mutations', () => {
     expect(result.line).not.toHaveProperty('vendorAccountId')
     expect(result.line).not.toHaveProperty('vendorSnapshot')
     expect(result.line).not.toHaveProperty('orderedAt')
+  })
+
+  it('enforces fresh technician assignment and pending-quote state before create, replace, or delete', async () => {
+    const [foreignLine] = await db.insert(jobLines).values({
+      shopId, jobId: excludedJobId, kind: 'fee', description: 'Existing rear fee',
+      priceCents: 500, taxable: true, source: 'manual',
+    }).returning()
+    const fingerprint = manualDraftLineFingerprint(foreignLine)
+    const [version] = await db.insert(quoteVersions).values({
+      shopId, ticketId, versionNumber: 1, snapshot: snapshot([excludedJobId]),
+      createdByProfileId: uuid(5),
+    }).returning()
+
+    await expect(create(uuid(105), partBody(), { jobId: excludedJobId }))
+      .resolves.toEqual({ ok: false, error: 'not_found' })
+    await expect(replaceDraftLine(db, {
+      actor, ticketId, jobId: excludedJobId, lineId: foreignLine.id,
+      expectedLineFingerprint: fingerprint,
+      body: { kind: 'fee', description: 'Changed rear fee', priceCents: 700, taxable: true },
+    })).resolves.toEqual({ ok: false, error: 'not_found' })
+    await expect(deleteDraftLine(db, {
+      actor, ticketId, jobId: excludedJobId, lineId: foreignLine.id,
+      expectedLineFingerprint: fingerprint,
+    })).resolves.toEqual({ ok: false, error: 'not_found' })
+    expect(await db.select().from(jobLines).where(eq(jobLines.id, foreignLine.id)))
+      .toMatchObject([{ description: 'Existing rear fee', priceCents: 500 }])
+    expect((await db.select().from(quoteVersions).where(eq(quoteVersions.id, version.id)))[0].supersededAt)
+      .toBeNull()
+
+    for (const [index, state] of ['quote_ready', 'sent', 'approved', 'declined', 'deferred']
+      .entries()) {
+      await db.update(ticketJobs).set({ approvalState: state as never }).where(eq(ticketJobs.id, jobId))
+      await expect(create(uuid(110 + index))).resolves.toEqual({ ok: false, error: 'not_found' })
+    }
+    await db.update(ticketJobs).set({ approvalState: 'pending_quote', assignedTechId: null })
+      .where(eq(ticketJobs.id, jobId))
+    await expect(create(uuid(116))).resolves.toEqual({ ok: false, error: 'not_found' })
+  })
+
+  it('keeps advisor, parts, and owner cross-job editing across every current approval state', async () => {
+    const roles = [uuid(5), uuid(6), uuid(7)]
+    const states = ['pending_quote', 'quote_ready', 'sent', 'approved', 'declined', 'deferred'] as const
+    let key = 200
+    for (const profileId of roles) {
+      for (const approvalState of states) {
+        await db.update(ticketJobs).set({ approvalState }).where(eq(ticketJobs.id, excludedJobId))
+        await expect(create(uuid(key), {
+          kind: 'fee', description: `${profileId}:${approvalState}`, priceCents: key, taxable: true,
+        }, { actor: { profileId }, jobId: excludedJobId })).resolves.toMatchObject({
+          ok: true, changed: true,
+        })
+        key += 1
+      }
+    }
   })
 
   it('never returns internal cost or vendor lifecycle fields from create or replace', async () => {
@@ -229,7 +289,7 @@ describe('Shop OS quote draft mutations', () => {
     })
     await db.insert(ticketJobs).values({
       id: upperJobId, shopId, ticketId: upperTicketId,
-      title: 'Uppercase work', kind: 'repair', requiredSkillTier: 1,
+      title: 'Uppercase work', kind: 'repair', requiredSkillTier: 1, assignedTechId: profileId,
     })
     const upper = (value: string) => value.toUpperCase()
     const created = await createDraftLine(db, {
@@ -270,7 +330,8 @@ describe('Shop OS quote draft mutations', () => {
   it('conflicts on changed or cross-context client-ID reuse without leaking the collision', async () => {
     await create(uuid(120))
     await expect(create(uuid(120), partBody({ description: 'Changed' }))).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
-    await expect(create(uuid(120), partBody(), { jobId: excludedJobId })).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+    await expect(create(uuid(120), partBody(), { jobId: excludedJobId }))
+      .resolves.toEqual({ ok: false, error: 'not_found' })
     await expect(create(uuid(120), partBody(), { actor: { profileId: uuid(2) }, ticketId: uuid(999), jobId: uuid(999) })).resolves.toEqual({ ok: false, error: 'not_found' })
   })
 
@@ -350,7 +411,8 @@ describe('Shop OS quote draft mutations', () => {
     await db.update(ticketJobs).set({ approvalState: 'quote_ready' }).where(eq(ticketJobs.id, excludedJobId))
     const [version] = await db.insert(quoteVersions).values({ shopId, ticketId, versionNumber: 1, snapshot: snapshot([jobId]), createdByProfileId: uuid(1) }).returning()
     await db.update(ticketJobs).set({ approvedQuoteVersionId: version.id }).where(eq(ticketJobs.id, jobId))
-    await expect(create(uuid(150))).resolves.toMatchObject({ ok: true, changed: true })
+    await expect(create(uuid(150), partBody(), { actor: { profileId: uuid(5) } }))
+      .resolves.toMatchObject({ ok: true, changed: true })
     const jobs = await db.select().from(ticketJobs)
     expect(jobs.find((job) => job.id === jobId)).toMatchObject({ approvalState: 'pending_quote', approvedQuoteVersionId: null })
     expect(jobs.find((job) => job.id === excludedJobId)).toMatchObject({ approvalState: 'quote_ready' })

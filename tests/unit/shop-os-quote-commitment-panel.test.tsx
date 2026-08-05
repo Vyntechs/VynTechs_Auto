@@ -26,6 +26,7 @@ function draftBuilder() {
     },
     jobs: [{
       id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open',
+      canEdit: true,
       story: { content: null, source: null, reviewStatus: null, revision: 0 },
       storyMode: null,
       decisionEligible: false,
@@ -38,7 +39,11 @@ function draftBuilder() {
         lineFingerprint: 'c'.repeat(64),
       }],
     }],
-    capabilities: { canRecordCustomerApproval: true, canCreateCustomerApprovalLink: true },
+    capabilities: {
+      canPrepareQuote: true,
+      canRecordCustomerApproval: true,
+      canCreateCustomerApprovalLink: true,
+    },
     activeVersion: null,
     lastPreparedVersion: null,
     draftCommitment: COMMITMENT,
@@ -101,6 +106,18 @@ describe('QuoteCommitmentPanel', () => {
     expect(screen.getByText('$108.25')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Prepare quote' })).toBeEnabled()
     expect(primaryActions()).toEqual([screen.getByRole('button', { name: 'Prepare quote' })])
+  })
+
+  it('omits every Prepare affordance when the server denies ticket-wide preparation', () => {
+    const builder = {
+      ...draftBuilder(),
+      capabilities: { ...draftBuilder().capabilities, canPrepareQuote: false },
+    }
+    renderPanel({ builder, confirmation: COMMITMENT })
+
+    expect(screen.queryByRole('button', { name: /Prepare/i })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Prepare this exact quote?' })).toBeNull()
+    expect(primaryActions()).toHaveLength(0)
   })
 
   it('shows only immutable current prepared truth and current-version actions', () => {
