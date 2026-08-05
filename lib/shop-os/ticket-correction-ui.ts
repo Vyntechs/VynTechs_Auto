@@ -81,7 +81,7 @@ const activitySchema = z.strictObject({
   id: uuid,
   jobId: uuid.nullable(),
   kind: z.enum([
-    'work_paused', 'work_resumed', 'job_blocked', 'job_hold_resolved', 'job_reassigned',
+    'work_paused', 'work_resumed', 'work_completed', 'job_blocked', 'job_hold_resolved', 'job_reassigned',
     'job_handed_off', 'ticket_canceled', 'ticket_reopened', 'ticket_corrected',
   ]),
   actorName: nullableText(200),

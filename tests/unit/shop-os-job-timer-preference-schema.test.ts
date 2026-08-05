@@ -20,6 +20,14 @@ describe('job timer preference migration', () => {
         is_nullable: 'NO',
         column_default: 'false',
       }])
+      const activityConstraint = await fixture.client.query<{ definition: string }>(`
+        select pg_get_constraintdef(oid) as definition
+        from pg_constraint
+        where conrelid = 'public.ticket_activity'::regclass
+          and conname = 'ticket_activity_kind_valid'
+      `)
+      expect(activityConstraint.rows).toHaveLength(1)
+      expect(activityConstraint.rows[0]?.definition).toContain("'work_completed'::text")
 
       await fixture.client.query(`
         insert into profiles (user_id)

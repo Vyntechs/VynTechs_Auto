@@ -417,13 +417,26 @@ export async function mutateSimpleWork(
           eq(ticketJobs.updatedAt, job.updatedAt),
         ))
         .returning()
-      return updated
-        ? {
-            ok: true,
-            changed: true,
-            work: safeWork(updated, timerEnabled),
-          }
-        : failure('conflict', true)
+      if (!updated) return failure('conflict', true)
+      const activity = await appendTicketActivity(tx as AppDb, {
+        shopId: parsedActor.data.shopId,
+        ticketId: context.ticket.id,
+        jobId: job.id,
+        actorProfileId: parsedActor.data.profileId,
+        kind: 'work_completed',
+        requestKey: randomUUID(),
+        payload: {
+          from: 'in_progress',
+          to: 'done',
+          completion: action.completion.kind,
+        },
+      })
+      if (!activity.ok) throw new Error('ticket_activity_conflict')
+      return {
+        ok: true,
+        changed: true,
+        work: safeWork(updated, timerEnabled),
+      }
     })
   } catch (error) {
     if (isLockUnavailable(error)) return failure('conflict', true)

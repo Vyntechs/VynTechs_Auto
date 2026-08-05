@@ -10,8 +10,8 @@ declare
   current_type "char";
   current_validated boolean;
   current_no_inherit boolean;
-  expected_old constant text := 'CHECK ((kind = ANY (ARRAY[''work_paused''::text, ''work_resumed''::text, ''job_blocked''::text, ''job_hold_resolved''::text, ''job_reassigned''::text, ''job_handed_off''::text, ''ticket_canceled''::text, ''ticket_reopened''::text])))';
-  expected_complete constant text := 'CHECK ((kind = ANY (ARRAY[''work_paused''::text, ''work_resumed''::text, ''job_blocked''::text, ''job_hold_resolved''::text, ''job_reassigned''::text, ''job_handed_off''::text, ''ticket_canceled''::text, ''ticket_reopened''::text, ''ticket_corrected''::text])))';
+  expected_old constant text := 'CHECK ((kind = ANY (ARRAY[''work_paused''::text, ''work_resumed''::text, ''work_completed''::text, ''job_blocked''::text, ''job_hold_resolved''::text, ''job_reassigned''::text, ''job_handed_off''::text, ''ticket_canceled''::text, ''ticket_reopened''::text])))';
+  expected_complete constant text := 'CHECK ((kind = ANY (ARRAY[''work_paused''::text, ''work_resumed''::text, ''work_completed''::text, ''job_blocked''::text, ''job_hold_resolved''::text, ''job_reassigned''::text, ''job_handed_off''::text, ''ticket_canceled''::text, ''ticket_reopened''::text, ''ticket_corrected''::text])))';
 begin
   select
     constraint_row.contype,
@@ -35,7 +35,7 @@ begin
     drop constraint ticket_activity_kind_valid;
   alter table public.ticket_activity
     add constraint ticket_activity_kind_valid check (kind in (
-      'work_paused', 'work_resumed', 'job_blocked', 'job_hold_resolved',
+      'work_paused', 'work_resumed', 'work_completed', 'job_blocked', 'job_hold_resolved',
       'job_reassigned', 'job_handed_off', 'ticket_canceled', 'ticket_reopened',
       'ticket_corrected'
     ));

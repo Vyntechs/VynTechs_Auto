@@ -300,3 +300,8 @@ Reason: Guessed full hashes create false evidence even when the short prefix is 
 Trigger: A strict API response adds or removes a required field or action.
 Rule: Search every repository fixture and golden journey for the old envelope or action before the full suite.
 Reason: Three legacy fixtures and one golden flow escaped focused tests and caused five release-gate failures.
+
+### promised-receipts-need-replay-tests
+Trigger: A design promises a durable activity or receipt beside a state change.
+Rule: Test both receipt creation and replay deduplication before implementation can pass.
+Reason: The state can succeed while required audit history is silently absent.

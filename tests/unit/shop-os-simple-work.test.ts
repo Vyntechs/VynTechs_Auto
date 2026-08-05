@@ -560,6 +560,20 @@ describe('Shop OS approved simple work', () => {
     })
     if (!completed.ok) throw new Error('completion failed')
 
+    expect(await db.select().from(ticketActivity)).toEqual([
+      expect.objectContaining({
+        kind: 'work_completed',
+        ticketId,
+        jobId,
+        actorProfileId: techId,
+        payload: {
+          from: 'in_progress',
+          to: 'done',
+          completion: 'as_approved',
+        },
+      }),
+    ])
+
     await db.update(quoteVersions)
       .set({ supersededAt: new Date() })
       .where(eq(quoteVersions.id, versionId))
@@ -569,6 +583,7 @@ describe('Shop OS approved simple work', () => {
       changed: false,
       work: completed.work,
     })
+    expect(await db.select().from(ticketActivity)).toHaveLength(1)
   })
 
   it('preserves an older saved internal detail when completing as approved', async () => {
