@@ -77,7 +77,7 @@ export type AssignmentTierWarning = {
 export type TicketActivityView = {
   id: string
   jobId: string | null
-  kind: 'work_paused' | 'work_resumed' | 'job_blocked' | 'job_hold_resolved' | 'job_reassigned' | 'job_handed_off' | 'ticket_canceled' | 'ticket_reopened' | 'ticket_corrected'
+  kind: 'work_paused' | 'work_resumed' | 'work_completed' | 'job_blocked' | 'job_hold_resolved' | 'job_reassigned' | 'job_handed_off' | 'ticket_canceled' | 'ticket_reopened' | 'ticket_corrected'
   actorName: string | null
   summary: string
   correctionScope?: 'identity' | 'concern' | 'job' | 'job_removed' | null
@@ -1098,6 +1098,7 @@ function ticketActivitySummary(
   switch (kind) {
     case 'work_paused': return `${subject}Clock paused.`
     case 'work_resumed': return `${subject}Clock resumed.`
+    case 'work_completed': return `${subject}Completed.`
     case 'job_blocked': return `${subject}Put on hold${bounded(payload.holdNote) ? ` — ${bounded(payload.holdNote)}` : '.'}`
     case 'job_hold_resolved': return `${subject}Hold resolved.`
     case 'job_reassigned': return `${subject}Assignment changed.`

@@ -16,7 +16,7 @@ const workspace = {
   id: uuid(1), title: 'Install lift kit', kind: 'repair', workStatus: 'in_progress',
   workNotes: 'Started', startedAt: '2026-07-11T11:30:00.000Z', completedAt: null,
   clockedOnSince: '2026-07-11T11:30:00.000Z', activeSeconds: 0,
-  updatedAt: '2026-07-11T12:00:00.000Z', authorization: 'approved',
+  updatedAt: '2026-07-11T12:00:00.000Z', timerEnabled: true, authorization: 'approved',
   approvedScope: {
     authorizationPurpose: null,
     customerSuppliedPartsNote: 'Customer supplied unopened lift kit.',
@@ -28,7 +28,7 @@ describe('Shop OS simple-work UI contract', () => {
   it('strictly parses bounded text-only workspace, mutation, and escalation responses', () => {
     expect(parseSimpleWorkWorkspaceResponse({ workspace })).toEqual(workspace)
     expect(parseSimpleWorkMutationResponse({
-      changed: true, work: { status: 'done', workNotes: 'Done', startedAt: '2026-07-11T11:30:00.000Z', completedAt: '2026-07-11T12:02:00.000Z', clockedOnSince: null, activeSeconds: 1920, updatedAt: '2026-07-11T12:02:00.000Z' },
+      changed: true, work: { status: 'done', workNotes: 'Done', startedAt: '2026-07-11T11:30:00.000Z', completedAt: '2026-07-11T12:02:00.000Z', clockedOnSince: null, activeSeconds: 1920, updatedAt: '2026-07-11T12:02:00.000Z', timerEnabled: true },
     })).toMatchObject({ changed: true, work: { status: 'done' } })
     expect(parseEscalationResponse({
       changed: true,
@@ -63,6 +63,9 @@ describe('Shop OS simple-work UI contract', () => {
     expect(parseSimpleWorkWorkspaceResponse({ workspace: { ...workspace, shopId: uuid(9) } })).toBeNull()
     expect(parseSimpleWorkWorkspaceResponse({ workspace: { ...workspace, attachments: [] } })).toBeNull()
     expect(parseSimpleWorkWorkspaceResponse({ workspace: { ...workspace, hasCompletionProof: false } })).toBeNull()
+    const { timerEnabled: _timerEnabled, ...withoutTimerEnabled } = workspace
+    expect(parseSimpleWorkWorkspaceResponse({ workspace: withoutTimerEnabled })).toBeNull()
+    expect(parseSimpleWorkWorkspaceResponse({ workspace: { ...workspace, timerEnabled: 'yes' } })).toBeNull()
     expect(parseSimpleWorkWorkspaceResponse({ workspace: { ...workspace, approvedScope: undefined } })).toBeNull()
     expect(parseSimpleWorkWorkspaceResponse({ workspace: { ...workspace, approvedScope: {
       ...workspace.approvedScope,

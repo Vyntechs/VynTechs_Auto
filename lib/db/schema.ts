@@ -117,6 +117,7 @@ export const profiles = pgTable(
     fullName: text('full_name'),
     role: text('role').default('tech').notNull(),
     skillTier: integer('skill_tier'),
+    jobTimerEnabled: boolean('job_timer_enabled').default(false).notNull(),
     membershipStatus: text('membership_status', {
       enum: ['pending', 'active'],
     }).default('active').notNull(),
@@ -524,6 +525,7 @@ export const ticketJobs = pgTable(
 export const TICKET_ACTIVITY_KINDS = [
   'work_paused',
   'work_resumed',
+  'work_completed',
   'job_blocked',
   'job_hold_resolved',
   'job_reassigned',
@@ -578,7 +580,7 @@ export const ticketActivity = pgTable(
     check(
       'ticket_activity_kind_valid',
       sql`${table.kind} in (
-        'work_paused', 'work_resumed', 'job_blocked', 'job_hold_resolved',
+        'work_paused', 'work_resumed', 'work_completed', 'job_blocked', 'job_hold_resolved',
         'job_reassigned', 'job_handed_off', 'ticket_canceled', 'ticket_reopened',
         'ticket_corrected'
       )`,

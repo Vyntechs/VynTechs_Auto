@@ -117,6 +117,7 @@ const approvedWorkWorkspace = {
   clockedOnSince: null,
   activeSeconds: 0,
   updatedAt: '2026-08-04T20:00:00.000Z',
+  timerEnabled: false,
   authorization: 'approved' as const,
   approvedScope: {
     authorizationPurpose: null,
@@ -302,7 +303,7 @@ describe('TodayJobsBoard persisted ledger', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Review & clock on' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review & start work' }))
 
     expect(screen.getByLabelText('Work on this job')).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('Opening assigned work…')
@@ -313,8 +314,8 @@ describe('TodayJobsBoard persisted ledger', () => {
     expect(screen.queryByRole('link', { name: 'Open the full work page' })).toBeNull()
   })
 
-  it('settles an approved claim into exact scope before a separate clock-on tap', async () => {
-    const runningAt = '2026-08-04T20:01:00.000Z'
+  it('settles an approved claim into exact scope before a separate start-work tap', async () => {
+    const startedAt = '2026-08-04T20:01:00.000Z'
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({
         assignment: {
@@ -332,11 +333,12 @@ describe('TodayJobsBoard persisted ledger', () => {
         work: {
           status: 'in_progress',
           workNotes: null,
-          startedAt: runningAt,
+          startedAt,
           completedAt: null,
-          clockedOnSince: runningAt,
+          clockedOnSince: null,
           activeSeconds: 0,
-          updatedAt: runningAt,
+          updatedAt: startedAt,
+          timerEnabled: false,
         },
       }))
     vi.stubGlobal('fetch', fetchMock)
@@ -369,12 +371,19 @@ describe('TodayJobsBoard persisted ledger', () => {
     )
     expect(fetchMock).toHaveBeenCalledTimes(2)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Clock on' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Start work' }))
 
-    await waitFor(() => expect(screen.getByText(/Clock running since/)).toBeInTheDocument())
+    await screen.findByRole('heading', { name: 'Work in progress' })
+    expect(screen.getByRole('button', { name: 'Complete as approved' })).toBeEnabled()
     expect(fetchMock).toHaveBeenNthCalledWith(3,
       `/api/tickets/${HANDOFF_TICKET}/jobs/${HANDOFF_JOB}/work`,
-      expect.objectContaining({ method: 'POST', body: JSON.stringify({ action: 'clock_on' }) }),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'start_work',
+          expectedUpdatedAt: approvedWorkWorkspace.updatedAt,
+        }),
+      }),
     )
   })
 
@@ -407,9 +416,9 @@ describe('TodayJobsBoard persisted ledger', () => {
       currentProfileId="profile-1"
     />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Review & clock on' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review & start work' }))
     await screen.findByRole('heading', { name: 'Exactly what is approved' })
-    fireEvent.click(screen.getByRole('button', { name: 'Clock on' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Start work' }))
 
     expect(await screen.findByRole('heading', { name: 'Work access changed' })).toBeInTheDocument()
     await waitFor(() => expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/today/jobs', {
@@ -417,8 +426,83 @@ describe('TodayJobsBoard persisted ledger', () => {
       cache: 'no-store',
     }))
     expect(await screen.findByText('Waiting for customer')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Clock on' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Start work' })).toBeNull()
     expect(screen.getByRole('link', { name: 'Review repair order' })).toBeInTheDocument()
+  })
+
+  it('settles completed mounted work in place, then removes it only when the receipt closes', async () => {
+    const assigned = {
+      ...approvedAvailableMaintenance,
+      workStatus: 'in_progress' as const,
+      assignmentState: 'mine' as const,
+      assignedTechName: 'Taylor Tech',
+      canClaim: false,
+    }
+    const activeWorkspace = {
+      ...approvedWorkWorkspace,
+      workStatus: 'in_progress' as const,
+      startedAt: '2026-08-04T20:01:00.000Z',
+      updatedAt: '2026-08-04T20:01:00.000Z',
+    }
+    const completedAt = '2026-08-04T20:12:00.000Z'
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ workspace: activeWorkspace, partRequests: [] }))
+      .mockResolvedValueOnce(Response.json({
+        changed: true,
+        work: {
+          status: 'done',
+          workNotes: 'Completed as approved.',
+          startedAt: activeWorkspace.startedAt,
+          completedAt,
+          clockedOnSince: null,
+          activeSeconds: 0,
+          updatedAt: completedAt,
+          timerEnabled: false,
+        },
+      }))
+      .mockResolvedValueOnce(Response.json({
+        todayJobs: {
+          myJobs: [], openJobs: [], createdJobs: [], teamJobs: [], partsJobs: [],
+          readyToCollect: [], linkedSessionIds: [], hasMore: false,
+        },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<TodayJobsBoard
+      myJobs={[assigned]}
+      openJobs={[]}
+      role="tech"
+      currentProfileId="profile-1"
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continue work' }))
+    await screen.findByRole('heading', { name: 'Finish this job' })
+    fireEvent.click(screen.getByRole('button', { name: 'Complete as approved' }))
+
+    expect(await screen.findByRole('heading', { name: 'Work complete' })).toHaveFocus()
+    const completedRow = screen.getByRole('article', {
+      name: `Repair order ${assigned.ticketNumber}: ${assigned.title}`,
+    })
+    expect(within(completedRow).getByText('Complete')).toBeInTheDocument()
+    expect(within(completedRow).queryByRole('button')).not.toBeInTheDocument()
+    expect(screen.getByText('Completed as approved.')).toBeInTheDocument()
+    expect(screen.getByText(`Work complete for repair order ${assigned.ticketNumber}.`))
+      .toHaveAttribute('role', 'status')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    const close = screen.getByRole('button', { name: 'Close work' })
+    fireEvent.click(close)
+    fireEvent.click(close)
+
+    await waitFor(() => expect(screen.queryByRole('article', {
+      name: `Repair order ${assigned.ticketNumber}: ${assigned.title}`,
+    })).not.toBeInTheDocument())
+    expect(screen.getByRole('region', { name: 'Work in the shop' })).toHaveFocus()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/today/jobs', {
+      headers: { accept: 'application/json' },
+      cache: 'no-store',
+    })
   })
 
   it('keeps a waiting claim in My work without opening a work tool', async () => {
@@ -519,7 +603,7 @@ describe('TodayJobsBoard persisted ledger', () => {
       '/api/tickets/ticket-44/jobs/job-maintenance/interruption',
       expect.objectContaining({ method: 'POST' }),
     )
-    expect(screen.getByRole('button', { name: 'Review & clock on' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Review & start work' })).toBeEnabled()
   })
 
   it('shows technician waiting truth without exposing price-building', () => {
@@ -535,7 +619,7 @@ describe('TodayJobsBoard persisted ledger', () => {
 
     expect(screen.getByText('Waiting for quote')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Build quote' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Review & clock on' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Review & start work' })).toBeNull()
   })
 
   it('keeps blocked technician work in repair-order recovery without exposing price-building', () => {
@@ -590,7 +674,7 @@ describe('TodayJobsBoard persisted ledger', () => {
     ]} openJobs={[]} role="tech" currentProfileId="profile-1" />)
 
     expect(screen.getByText('Running work').closest('article')).toHaveTextContent('Clock running since')
-    expect(screen.getByText('Paused work').closest('article')).toHaveTextContent('Clock paused')
+    expect(screen.getByText('Paused work').closest('article')).toHaveTextContent('Work in progress')
     expect(screen.queryByText(/seconds|payroll/i)).toBeNull()
   })
 

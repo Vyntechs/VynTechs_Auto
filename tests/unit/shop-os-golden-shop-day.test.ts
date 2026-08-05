@@ -9,6 +9,7 @@ import {
 } from '@/lib/shop-os/quotes'
 import { closeTicket, getTicketRingOut, recordTicketPayment } from '@/lib/shop-os/ring-out'
 import { getSimpleWorkWorkspace, mutateSimpleWork } from '@/lib/shop-os/simple-work'
+import { updateJobTimerPreference } from '@/lib/shop-os/job-timer-preference'
 import { mutateJobInterruption } from '@/lib/shop-os/interruption'
 import { addTicketJob, getTicketDetail, listTodayTicketJobs, mutateTicketJobAssignment } from '@/lib/tickets'
 import { createGoldenShopDay, GOLDEN_KEYS } from '@/tests/helpers/golden-shop-day'
@@ -122,6 +123,22 @@ describe('Golden Shop Day release gate', () => {
   it.each([1, 2])('moves one synthetic repair order through every role without losing truth (run %s)', async () => {
     const golden = await createGoldenShopDay()
     try {
+      for (const technician of [golden.people.tech, golden.people.relief]) {
+        expect(await updateJobTimerPreference(golden.db, {
+          actor: {
+            profileId: technician.id,
+            shopId: golden.shop.id,
+            role: technician.role,
+            membershipStatus: technician.membershipStatus,
+            isFounder: false,
+          },
+          enabled: true,
+        })).toMatchObject({
+          ok: true,
+          preference: { profileId: technician.id, enabled: true },
+        })
+      }
+
       const created = await createCounterTicket(golden.db, {
         actor: golden.actors.advisor,
         body: {
@@ -179,11 +196,21 @@ describe('Golden Shop Day release gate', () => {
       expect(assignedTicket.ok).toBe(true)
       if (!assignedTicket.ok) throw new Error('assigned ticket unavailable')
       expect(commandKinds(golden.actors.tech, assignedTicket.ticket)).not.toContain('work')
+      const assignedWork = await getSimpleWorkWorkspace(golden.db, {
+        actor: { profileId: golden.people.tech.id, shopId: golden.shop.id },
+        ticketId,
+        jobId: job.id,
+      })
+      expect(assignedWork).toMatchObject({ ok: true, workspace: { timerEnabled: true } })
+      if (!assignedWork.ok) throw new Error('assigned work unavailable')
       expect(await mutateSimpleWork(golden.db, {
         actor: { profileId: golden.people.tech.id, shopId: golden.shop.id },
         ticketId,
         jobId: job.id,
-        body: { action: 'clock_on' },
+        body: {
+          action: 'start_work',
+          expectedUpdatedAt: assignedWork.workspace.updatedAt,
+        },
       })).toEqual({ ok: false, error: 'not_authorized' })
 
       const line = await createDraftLine(golden.db, {
@@ -267,13 +294,34 @@ describe('Golden Shop Day release gate', () => {
         ticketId,
       })).toEqual({ ok: false, error: 'unfinished_work' })
 
+      const approvedWork = await getSimpleWorkWorkspace(golden.db, {
+        actor: { profileId: golden.people.tech.id, shopId: golden.shop.id },
+        ticketId,
+        jobId: job.id,
+      })
+      expect(approvedWork).toMatchObject({
+        ok: true,
+        workspace: { authorization: 'approved', timerEnabled: true },
+      })
+      if (!approvedWork.ok) throw new Error('approved work unavailable')
       const started = await mutateSimpleWork(golden.db, {
         actor: { profileId: golden.people.tech.id, shopId: golden.shop.id },
         ticketId,
         jobId: job.id,
-        body: { action: 'clock_on' },
+        body: {
+          action: 'start_work',
+          expectedUpdatedAt: approvedWork.workspace.updatedAt,
+        },
       })
-      expect(started).toMatchObject({ ok: true, changed: true, work: { status: 'in_progress' } })
+      expect(started).toMatchObject({
+        ok: true,
+        changed: true,
+        work: {
+          status: 'in_progress',
+          timerEnabled: true,
+          clockedOnSince: expect.any(String),
+        },
+      })
       if (!started.ok) throw new Error('work start failed')
 
       const requested = await createPartRequest(golden.db, {
@@ -391,28 +439,29 @@ describe('Golden Shop Day release gate', () => {
         actor: golden.actors.parts,
       })).partsJobs).toEqual([])
 
-      const noted = await mutateSimpleWork(golden.db, {
-        actor: { profileId: golden.people.relief.id, shopId: golden.shop.id },
-        ticketId,
-        jobId: job.id,
-        body: {
-          action: 'save_note',
-          note: 'Alternator replaced; charging output verified at idle and under load.',
-          expectedUpdatedAt: resumed.ok ? resumed.work.updatedAt : started.work.updatedAt,
-        },
-      })
-      expect(noted).toMatchObject({ ok: true, changed: true })
-      if (!noted.ok) throw new Error('work note failed')
+      const completionDetail = 'Alternator replaced; charging output verified at idle and under load.'
       expect(await mutateSimpleWork(golden.db, {
         actor: { profileId: golden.people.relief.id, shopId: golden.shop.id },
         ticketId,
         jobId: job.id,
         body: {
-          action: 'save_note',
-          note: 'Delayed stale note that must not win.',
+          action: 'complete',
           expectedUpdatedAt: started.work.updatedAt,
+          completion: { kind: 'with_details', details: 'Delayed stale detail that must not win.' },
         },
       })).toEqual({ ok: false, error: 'conflict', retryable: true })
+      const completed = await mutateSimpleWork(golden.db, {
+        actor: { profileId: golden.people.relief.id, shopId: golden.shop.id },
+        ticketId,
+        jobId: job.id,
+        body: {
+          action: 'complete',
+          expectedUpdatedAt: resumed.ok ? resumed.work.updatedAt : started.work.updatedAt,
+          completion: { kind: 'with_details', details: completionDetail },
+        },
+      })
+      expect(completed).toMatchObject({ ok: true, changed: true, work: { status: 'done' } })
+      if (!completed.ok) throw new Error('work completion failed')
       expect(await getSimpleWorkWorkspace(golden.db, {
         actor: { profileId: golden.people.relief.id, shopId: golden.shop.id },
         ticketId,
@@ -420,15 +469,10 @@ describe('Golden Shop Day release gate', () => {
       })).toMatchObject({
         ok: true,
         workspace: {
-          workNotes: 'Alternator replaced; charging output verified at idle and under load.',
+          workStatus: 'done',
+          workNotes: completionDetail,
         },
       })
-      expect(await mutateSimpleWork(golden.db, {
-        actor: { profileId: golden.people.relief.id, shopId: golden.shop.id },
-        ticketId,
-        jobId: job.id,
-        body: { action: 'complete', expectedUpdatedAt: noted.work.updatedAt },
-      })).toMatchObject({ ok: true, changed: true, work: { status: 'done' } })
 
       const ringOut = await getTicketRingOut(golden.db, {
         actor: golden.actors.owner,

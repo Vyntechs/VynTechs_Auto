@@ -53,6 +53,7 @@ describe('Shop OS simple work routes', () => {
   it('rejects invalid JSON before the domain', async () => {
     const response = await POST(request('{'), params)
     expect(response.status).toBe(400)
+    expect(response.headers.get('cache-control')).toBe('no-store')
     expect(await response.json()).toEqual({ error: 'invalid_json' })
     expect(mutateSimpleWork).not.toHaveBeenCalled()
   })
@@ -60,18 +61,22 @@ describe('Shop OS simple work routes', () => {
   it('passes only persisted identity and maps safe success', async () => {
     vi.mocked(mutateSimpleWork).mockResolvedValue({
       ok: true, changed: true,
-      work: { status: 'in_progress', workNotes: null, startedAt: '2026-07-11T12:00:00.000Z', completedAt: null, clockedOnSince: '2026-07-11T12:00:00.000Z', activeSeconds: 0, updatedAt: '2026-07-11T12:00:00.000Z' },
+      work: { status: 'in_progress', workNotes: null, startedAt: '2026-07-11T12:00:00.000Z', completedAt: null, clockedOnSince: null, activeSeconds: 0, updatedAt: '2026-07-11T12:00:00.000Z', timerEnabled: false },
     })
-    const body = { action: 'clock_on' }
+    const body = {
+      action: 'start_work',
+      expectedUpdatedAt: '2026-07-11T11:59:00.000Z',
+    }
     const response = await POST(request(JSON.stringify(body)), params)
     expect(mutateSimpleWork).toHaveBeenCalledWith({}, {
       actor: { profileId: profile.id, shopId: profile.shopId },
       ticketId: TICKET_ID, jobId: JOB_ID, body,
     })
     expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('no-store')
     expect(await response.json()).toEqual({
       changed: true,
-      work: { status: 'in_progress', workNotes: null, startedAt: '2026-07-11T12:00:00.000Z', completedAt: null, clockedOnSince: '2026-07-11T12:00:00.000Z', activeSeconds: 0, updatedAt: '2026-07-11T12:00:00.000Z' },
+      work: { status: 'in_progress', workNotes: null, startedAt: '2026-07-11T12:00:00.000Z', completedAt: null, clockedOnSince: null, activeSeconds: 0, updatedAt: '2026-07-11T12:00:00.000Z', timerEnabled: false },
     })
   })
 
@@ -79,7 +84,7 @@ describe('Shop OS simple work routes', () => {
     const workspace: SimpleWorkWorkspaceView = {
       id: JOB_ID, title: 'Install lift kit', kind: 'repair', workStatus: 'open', workNotes: null,
       startedAt: null, completedAt: null, clockedOnSince: null, activeSeconds: 0,
-      updatedAt: '2026-07-11T12:00:00.000Z', authorization: 'approved',
+      updatedAt: '2026-07-11T12:00:00.000Z', timerEnabled: false, authorization: 'approved',
       approvedScope: { authorizationPurpose: null, customerSuppliedPartsNote: null,
         lines: [{ kind: 'labor', description: 'Install lift kit', hours: '2' }] },
     }
@@ -98,6 +103,7 @@ describe('Shop OS simple work routes', () => {
       jobId: JOB_ID,
     })
     expect(await response.json()).toEqual({ workspace, partRequests })
+    expect(response.headers.get('cache-control')).toBe('no-store')
   })
 
   it.each([
@@ -112,6 +118,7 @@ describe('Shop OS simple work routes', () => {
     })
     const response = await POST(request(JSON.stringify({ action: 'clock_on' })), params)
     expect(response.status).toBe(status)
+    expect(response.headers.get('cache-control')).toBe('no-store')
     expect(await response.json()).toEqual({ error, ...(retryable ? { retryable: true } : {}) })
   })
 })

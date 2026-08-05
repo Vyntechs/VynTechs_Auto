@@ -271,3 +271,37 @@ Reason: Playwright clears test-results at startup, so a failed reviewer rerun ca
 Trigger: Preparing a reviewer packet with a commit identifier.
 Rule: Insert the exact output of `git rev-parse HEAD`; never manually extend a short hash.
 Reason: One mistyped character triggered a false review stop despite a correct diff package.
+
+### release-close-must-start-the-next-driver-slice
+Trigger: A shipped chunk names a known next slice in an active driver.
+Rule: Preserve release proof, update DRIVER_STATE, and begin the next slice before final handback.
+Reason: The founder should never discover an idle promised continuation by asking for status.
+
+### optional-tools-must-not-gate-core-work
+Trigger: A personal utility helps some operators but is irrelevant to completing the role's real job.
+Rule: Separate the core state transition from the utility and make the utility an authorized per-user option.
+Reason: A mandatory utility adds friction and falsely defines the workflow around one person's preference.
+
+### routine-completion-reuses-approved-scope
+Trigger: A routine completion asks technicians to retype work already captured in the approved scope.
+Rule: Offer explicit Completed as approved; use free text only for optional detail or a deviation.
+Reason: Repeating known work makes completion painful without adding trustworthy information.
+
+### storage-language-must-not-reach-the-workflow
+Trigger: A founder asks what “notes” means after the product decision already made free text optional.
+Rule: Hide legacy storage names; say Complete as approved and Add detail everywhere the technician sees.
+Reason: Internal field vocabulary makes an optional escape hatch feel like mandatory paperwork.
+### exact-hash-before-report
+Trigger: Reporting a commit hash to humans.
+Rule: Run `git rev-parse HEAD` immediately before publishing; copy the returned value verbatim.
+Reason: Guessed full hashes create false evidence even when the short prefix is right.
+
+### strict-contract-fixtures-need-full-sweep
+Trigger: A strict API response adds or removes a required field or action.
+Rule: Search every repository fixture and golden journey for the old envelope or action before the full suite.
+Reason: Three legacy fixtures and one golden flow escaped focused tests and caused five release-gate failures.
+
+### promised-receipts-need-replay-tests
+Trigger: A design promises a durable activity or receipt beside a state change.
+Rule: Test both receipt creation and replay deduplication before implementation can pass.
+Reason: The state can succeed while required audit history is silently absent.

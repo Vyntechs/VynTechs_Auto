@@ -38,6 +38,15 @@
 .module textarea, .concern textarea { min-height: 112px; resize: vertical; }
 .actionRow { min-width: 0; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-top: 12px; }
 .actionRow { color: var(--vt-fg-3); font-size: var(--vt-fs-12); }
+.timerTool { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 18px; }
+.timerTool .helper { flex: 1 1 260px; }
+.detailField { margin-top: 18px; }
+.detailCount { display: block; margin-top: 7px; color: var(--vt-fg-3); font-family: var(--vt-font-mono); font-size: var(--vt-fs-12); text-align: right; }
+.detailConflict { display: grid; gap: 12px; margin: 18px 0; padding: 16px; border: var(--vt-stroke-strong); background: var(--vt-surface); }
+.detailConflict > div { min-width: 0; }
+.detailConflict strong { font-family: var(--vt-font-mono); font-size: var(--vt-fs-12); text-transform: uppercase; }
+.detailConflict p { margin: 6px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.workRailActions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
 .primary, .secondary, .ticketLink { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--vt-radius-2); padding: 10px 18px; font-family: var(--vt-font-sans); font-size: 14px; font-weight: 650; cursor: pointer; text-decoration: none; }
 .primary { border: 1px solid var(--vt-accent); background: var(--vt-accent); color: var(--vt-fg-on-signal); }
 .secondary, .ticketLink { border: 1px solid var(--vt-accent); background: var(--vt-bg); color: var(--vt-accent); }
@@ -53,5 +62,5 @@
 .ticketLink { justify-self: start; }
 .closeEmbedded { min-width: 44px; min-height: 44px; flex: 0 0 auto; border: var(--vt-stroke-strong); border-radius: var(--vt-radius-2); background: var(--vt-bg); color: var(--vt-fg); padding: 8px 12px; font-family: var(--vt-font-sans); font-weight: 650; cursor: pointer; }
 .closeEmbedded:focus-visible { outline: 2px solid var(--vt-focus-ring); outline-offset: 3px; }
-@media (max-width: 420px) { .content { padding: 20px 14px 36px; } .primary, .secondary { width: 100%; } .approvedScope li { grid-template-columns: 64px minmax(0, 1fr); } .approvedScope li small { grid-column: 2; text-align: left; } }
+@media (max-width: 420px) { .content { padding: 20px 14px 36px; } .primary, .secondary { width: 100%; } .approvedScope li { grid-template-columns: 64px minmax(0, 1fr); } .approvedScope li small { grid-column: 2; text-align: left; } .timerTool, .workRailActions { align-items: stretch; } }
 @media (prefers-reduced-motion: reduce) { .screen * { scroll-behavior: auto !important; } }

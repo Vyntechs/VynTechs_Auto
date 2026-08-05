@@ -10,7 +10,10 @@ import {
   ticketJobs,
   tickets,
 } from '@/lib/db/schema'
-import { isShopRole } from '@/lib/shop-os/capabilities'
+import {
+  isShopRole,
+  isWrenchingSkillTier,
+} from '@/lib/shop-os/capabilities'
 import {
   isLockUnavailable,
   readApprovedJobScope,
@@ -32,6 +35,7 @@ type WorkProjection = {
   clockedOnSince: string | null
   activeSeconds: number
   updatedAt: string
+  timerEnabled: boolean
 }
 
 export type SimpleWorkMutationResult =
@@ -40,22 +44,32 @@ export type SimpleWorkMutationResult =
 
 const uuidSchema = z.uuid().transform((value) => value.toLowerCase())
 const actionSchema = z.discriminatedUnion('action', [
+  z.strictObject({
+    action: z.literal('start_work'),
+    expectedUpdatedAt: z.string().datetime({ offset: true }),
+  }),
   z.strictObject({ action: z.literal('clock_on') }),
   z.strictObject({ action: z.literal('clock_off') }),
   z.strictObject({
-    action: z.literal('save_note'),
-    note: z.string().trim().min(1).max(2_000),
-    expectedUpdatedAt: z.string().datetime({ offset: true }),
-  }),
-  z.strictObject({
     action: z.literal('complete'),
     expectedUpdatedAt: z.string().datetime({ offset: true }),
+    completion: z.discriminatedUnion('kind', [
+      z.strictObject({ kind: z.literal('as_approved') }),
+      z.strictObject({
+        kind: z.literal('with_details'),
+        details: z.string().trim().min(1).max(2_000),
+      }),
+    ]),
   }),
 ])
 
 type LockedContext = {
   ticket: Pick<typeof tickets.$inferSelect, 'id' | 'status'>
   job: typeof ticketJobs.$inferSelect
+  actor: Pick<
+    typeof profiles.$inferSelect,
+    'id' | 'role' | 'isComp' | 'skillTier' | 'jobTimerEnabled'
+  >
   versions: Array<typeof quoteVersions.$inferSelect>
   decisions: Array<Pick<typeof quoteEvents.$inferSelect, 'id' | 'kind' | 'jobId' | 'quoteVersionId' | 'createdAt'>>
 }
@@ -64,7 +78,19 @@ function failure(error: SimpleWorkError, retryable = false): SimpleWorkFailure {
   return retryable ? { ok: false, error, retryable: true } : { ok: false, error }
 }
 
-function safeWork(job: Pick<typeof ticketJobs.$inferSelect, 'workStatus' | 'workNotes' | 'workStartedAt' | 'workCompletedAt' | 'clockedOnSince' | 'activeSeconds' | 'updatedAt'>): WorkProjection {
+function safeWork(
+  job: Pick<
+    typeof ticketJobs.$inferSelect,
+    | 'workStatus'
+    | 'workNotes'
+    | 'workStartedAt'
+    | 'workCompletedAt'
+    | 'clockedOnSince'
+    | 'activeSeconds'
+    | 'updatedAt'
+  >,
+  timerEnabled: boolean,
+): WorkProjection {
   if (job.workStatus !== 'open' && job.workStatus !== 'in_progress' && job.workStatus !== 'done') {
     throw new TypeError('simple work status is unavailable')
   }
@@ -76,7 +102,15 @@ function safeWork(job: Pick<typeof ticketJobs.$inferSelect, 'workStatus' | 'work
     clockedOnSince: job.clockedOnSince ? job.clockedOnSince.toISOString() : null,
     activeSeconds: job.activeSeconds,
     updatedAt: job.updatedAt.toISOString(),
+    timerEnabled,
   }
+}
+
+function effectiveTimer(actor: Pick<
+  typeof profiles.$inferSelect,
+  'skillTier' | 'jobTimerEnabled'
+>): boolean {
+  return actor.jobTimerEnabled === true && isWrenchingSkillTier(actor.skillTier)
 }
 
 function latestDecision(context: LockedContext) {
@@ -134,7 +168,13 @@ async function lockContext(
     .for('update', { noWait: true })
 
   const [actor] = await db
-    .select({ id: profiles.id, role: profiles.role, isComp: profiles.isComp })
+    .select({
+      id: profiles.id,
+      role: profiles.role,
+      isComp: profiles.isComp,
+      skillTier: profiles.skillTier,
+      jobTimerEnabled: profiles.jobTimerEnabled,
+    })
     .from(profiles)
     .where(and(
       eq(profiles.id, input.actor.profileId),
@@ -172,7 +212,7 @@ async function lockContext(
       inArray(quoteEvents.kind, ['approved', 'declined', 'deferred']),
     ))
     .orderBy(asc(quoteEvents.createdAt), asc(quoteEvents.id))
-  return { ticket, job, versions, decisions }
+  return { ticket, job, actor, versions, decisions }
 }
 
 export function nextSimpleWorkTimestamp() {
@@ -211,41 +251,71 @@ export async function mutateSimpleWork(
       if (!context) return failure('not_found')
       const { job } = context
       const action = parsedAction.data
+      const timerEnabled = effectiveTimer(context.actor)
 
       if (action.action === 'complete' && job.workStatus === 'done') {
-        return { ok: true, changed: false, work: safeWork(job) }
+        return {
+          ok: true,
+          changed: false,
+          work: safeWork(job, timerEnabled),
+        }
       }
       if (context.ticket.status !== 'open') return failure('not_found')
 
-      // Clock on: start the job the first time (open -> in_progress) or resume
-      // the timer after a break. Either way it needs a pinned approval — a tech
-      // never clocks time onto work the customer has not authorized. A job may
-      // be clocked on to several at once; each carries its own clock.
-      if (action.action === 'clock_on') {
+      // Work state is independent from personal time tracking. Start work is
+      // the only open -> in_progress transition; the server decides whether the
+      // same transaction also opens a timer from current persisted eligibility.
+      if (action.action === 'start_work') {
         if (job.workStatus === 'done') return failure('not_ready')
-        if (job.workStatus === 'open') {
-          if (!hasPinnedApproval(context, true)) return failure('not_authorized')
-          const [updated] = await (tx as AppDb)
-            .update(ticketJobs)
-            .set({
-              workStatus: 'in_progress',
-              workStartedAt: sql`clock_timestamp()`,
-              clockedOnSince: sql`clock_timestamp()`,
-              updatedAt: nextSimpleWorkTimestamp(),
-            })
-            .where(and(
-              eq(ticketJobs.shopId, parsedActor.data.shopId),
-              eq(ticketJobs.id, job.id),
-              eq(ticketJobs.workStatus, 'open'),
-            ))
-            .returning()
-          return updated
-            ? { ok: true, changed: true, work: safeWork(updated) }
-            : failure('conflict', true)
+        if (job.workStatus === 'in_progress') {
+          if (!hasPinnedApproval(context, false)) return failure('not_authorized')
+          return {
+            ok: true,
+            changed: false,
+            work: safeWork(job, timerEnabled),
+          }
         }
+        if (job.workStatus !== 'open') return failure('not_ready')
+        if (!hasPinnedApproval(context, true)) return failure('not_authorized')
+        if (job.updatedAt.getTime() !== new Date(action.expectedUpdatedAt).getTime()) {
+          return failure('conflict', true)
+        }
+        const [updated] = await (tx as AppDb)
+          .update(ticketJobs)
+          .set({
+            workStatus: 'in_progress',
+            workStartedAt: sql`clock_timestamp()`,
+            clockedOnSince: timerEnabled ? sql`clock_timestamp()` : null,
+            updatedAt: nextSimpleWorkTimestamp(),
+          })
+          .where(and(
+            eq(ticketJobs.shopId, parsedActor.data.shopId),
+            eq(ticketJobs.id, job.id),
+            eq(ticketJobs.workStatus, 'open'),
+            eq(ticketJobs.updatedAt, job.updatedAt),
+          ))
+          .returning()
+        return updated
+          ? {
+              ok: true,
+              changed: true,
+              work: safeWork(updated, timerEnabled),
+            }
+          : failure('conflict', true)
+      }
+
+      // Clock on is timer-only. It can resume an already-started job only when
+      // the actor's current persisted preference and wrenching tier permit it.
+      if (action.action === 'clock_on') {
+        if (job.workStatus !== 'in_progress') return failure('not_ready')
         if (!hasPinnedApproval(context, false)) return failure('not_authorized')
+        if (!timerEnabled) return failure('not_ready')
         if (job.clockedOnSince !== null) {
-          return { ok: true, changed: false, work: safeWork(job) }
+          return {
+            ok: true,
+            changed: false,
+            work: safeWork(job, timerEnabled),
+          }
         }
         const [updated] = await (tx as AppDb)
           .update(ticketJobs)
@@ -271,14 +341,22 @@ export async function mutateSimpleWork(
           payload: { from: 'in_progress', clock: 'running' },
         })
         if (!activity.ok) throw new Error('ticket_activity_conflict')
-        return { ok: true, changed: true, work: safeWork(updated) }
+        return {
+          ok: true,
+          changed: true,
+          work: safeWork(updated, timerEnabled),
+        }
       }
 
       // Clock off: bank the open interval and stop the timer. Stopping needs no
       // approval; if nothing is running it is a no-op.
       if (action.action === 'clock_off') {
         if (job.clockedOnSince === null) {
-          return { ok: true, changed: false, work: safeWork(job) }
+          return {
+            ok: true,
+            changed: false,
+            work: safeWork(job, timerEnabled),
+          }
         }
         const [updated] = await (tx as AppDb)
           .update(ticketJobs)
@@ -304,40 +382,28 @@ export async function mutateSimpleWork(
           payload: { from: 'in_progress', clock: 'paused' },
         })
         if (!activity.ok) throw new Error('ticket_activity_conflict')
-        return { ok: true, changed: true, work: safeWork(updated) }
+        return {
+          ok: true,
+          changed: true,
+          work: safeWork(updated, timerEnabled),
+        }
       }
 
       if (job.workStatus !== 'in_progress') return failure('not_ready')
       if (!hasPinnedApproval(context, false)) return failure('not_authorized')
 
-      if (action.action === 'save_note') {
-        if (job.workNotes === action.note) {
-          return { ok: true, changed: false, work: safeWork(job) }
-        }
-        if (job.updatedAt.getTime() !== new Date(action.expectedUpdatedAt).getTime()) {
-          return failure('conflict', true)
-        }
-        const [updated] = await (tx as AppDb)
-          .update(ticketJobs)
-          .set({ workNotes: action.note, updatedAt: nextSimpleWorkTimestamp() })
-          .where(and(
-            eq(ticketJobs.shopId, parsedActor.data.shopId),
-            eq(ticketJobs.id, job.id),
-            eq(ticketJobs.updatedAt, job.updatedAt),
-          ))
-          .returning()
-        return updated
-          ? { ok: true, changed: true, work: safeWork(updated) }
-          : failure('conflict', true)
-      }
-
       if (job.updatedAt.getTime() !== new Date(action.expectedUpdatedAt).getTime()) {
         return failure('conflict', true)
       }
-      if (!job.workNotes?.trim()) return failure('not_ready')
+      const completionDetail = action.completion.kind === 'with_details'
+        ? action.completion.details
+        : job.workNotes?.trim()
+          ? job.workNotes
+          : 'Completed as approved.'
       const [updated] = await (tx as AppDb)
         .update(ticketJobs)
         .set({
+          workNotes: completionDetail,
           workStatus: 'done',
           workCompletedAt: sql`clock_timestamp()`,
           activeSeconds: settledActiveSeconds(),
@@ -351,9 +417,26 @@ export async function mutateSimpleWork(
           eq(ticketJobs.updatedAt, job.updatedAt),
         ))
         .returning()
-      return updated
-        ? { ok: true, changed: true, work: safeWork(updated) }
-        : failure('conflict', true)
+      if (!updated) return failure('conflict', true)
+      const activity = await appendTicketActivity(tx as AppDb, {
+        shopId: parsedActor.data.shopId,
+        ticketId: context.ticket.id,
+        jobId: job.id,
+        actorProfileId: parsedActor.data.profileId,
+        kind: 'work_completed',
+        requestKey: randomUUID(),
+        payload: {
+          from: 'in_progress',
+          to: 'done',
+          completion: action.completion.kind,
+        },
+      })
+      if (!activity.ok) throw new Error('ticket_activity_conflict')
+      return {
+        ok: true,
+        changed: true,
+        work: safeWork(updated, timerEnabled),
+      }
     })
   } catch (error) {
     if (isLockUnavailable(error)) return failure('conflict', true)
@@ -376,6 +459,8 @@ export async function getSimpleWorkWorkspace(
       id: profiles.id,
       role: profiles.role,
       isComp: profiles.isComp,
+      skillTier: profiles.skillTier,
+      jobTimerEnabled: profiles.jobTimerEnabled,
     })
       .from(profiles).where(and(
         eq(profiles.id, parsedActor.data.profileId),
@@ -422,7 +507,7 @@ export async function getSimpleWorkWorkspace(
       eq(quoteEvents.jobId, job.id),
       inArray(quoteEvents.kind, ['approved', 'declined', 'deferred']),
     )).orderBy(asc(quoteEvents.createdAt), asc(quoteEvents.id))
-    const context: LockedContext = { ticket, job, versions, decisions }
+    const context: LockedContext = { ticket, job, actor, versions, decisions }
     const authorization: 'approved' | 'declined' | 'awaiting_approval' = hasPinnedApproval(context, job.workStatus === 'open')
       ? 'approved'
       : job.approvalState === 'declined' ? 'declined' : 'awaiting_approval'
@@ -445,6 +530,7 @@ export async function getSimpleWorkWorkspace(
         clockedOnSince: job.clockedOnSince ? job.clockedOnSince.toISOString() : null,
         activeSeconds: job.activeSeconds,
         updatedAt: job.updatedAt.toISOString(),
+        timerEnabled: effectiveTimer(actor),
         authorization,
         ...(approvedScope ? { approvedScope } : {}),
       },

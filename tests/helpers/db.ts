@@ -74,6 +74,7 @@ export async function createTestDb(): Promise<{
   await ensureShopOsQuoteDeferralMigration(client)
   await ensureIntentAwareIntakeMigration(client)
   await ensureCustomerCopyIdentityMigration(client)
+  await ensureJobTimerPreferenceMigration(client)
   await ensureCustomerApprovalLinksMigration(client)
   await ensureTicketCorrectionMigration(client)
   return {
@@ -85,8 +86,9 @@ export async function createTestDb(): Promise<{
   }
 }
 
-const TICKET_ACTIVITY_KIND_OLD_DEFINITION = "CHECK ((kind = ANY (ARRAY['work_paused'::text, 'work_resumed'::text, 'job_blocked'::text, 'job_hold_resolved'::text, 'job_reassigned'::text, 'job_handed_off'::text, 'ticket_canceled'::text, 'ticket_reopened'::text])))"
-const TICKET_ACTIVITY_KIND_COMPLETE_DEFINITION = "CHECK ((kind = ANY (ARRAY['work_paused'::text, 'work_resumed'::text, 'job_blocked'::text, 'job_hold_resolved'::text, 'job_reassigned'::text, 'job_handed_off'::text, 'ticket_canceled'::text, 'ticket_reopened'::text, 'ticket_corrected'::text])))"
+const TICKET_ACTIVITY_KIND_PRE_WORK_DEFINITION = "CHECK ((kind = ANY (ARRAY['work_paused'::text, 'work_resumed'::text, 'job_blocked'::text, 'job_hold_resolved'::text, 'job_reassigned'::text, 'job_handed_off'::text, 'ticket_canceled'::text, 'ticket_reopened'::text])))"
+const TICKET_ACTIVITY_KIND_PRE_CORRECTION_DEFINITION = "CHECK ((kind = ANY (ARRAY['work_paused'::text, 'work_resumed'::text, 'work_completed'::text, 'job_blocked'::text, 'job_hold_resolved'::text, 'job_reassigned'::text, 'job_handed_off'::text, 'ticket_canceled'::text, 'ticket_reopened'::text])))"
+const TICKET_ACTIVITY_KIND_COMPLETE_DEFINITION = "CHECK ((kind = ANY (ARRAY['work_paused'::text, 'work_resumed'::text, 'work_completed'::text, 'job_blocked'::text, 'job_hold_resolved'::text, 'job_reassigned'::text, 'job_handed_off'::text, 'ticket_canceled'::text, 'ticket_reopened'::text, 'ticket_corrected'::text])))"
 
 type TicketActivityKindConstraintState = {
   oid: number
@@ -126,7 +128,7 @@ function exactTicketActivityKindConstraint(
 export async function ensureTicketCorrectionMigration(client: PGlite): Promise<void> {
   const before = await ticketActivityKindConstraint(client)
   if (exactTicketActivityKindConstraint(before, TICKET_ACTIVITY_KIND_COMPLETE_DEFINITION)) return
-  if (!exactTicketActivityKindConstraint(before, TICKET_ACTIVITY_KIND_OLD_DEFINITION)) {
+  if (!exactTicketActivityKindConstraint(before, TICKET_ACTIVITY_KIND_PRE_CORRECTION_DEFINITION)) {
     throw new Error('unexpected ticket correction constraint state in ephemeral database')
   }
 
@@ -215,6 +217,58 @@ export async function ensureCustomerCopyIdentityMigration(client: PGlite): Promi
       )
   `)
   if (applied.rows.length !== 6) throw new Error('customer copy identity migration failed')
+}
+
+export async function ensureJobTimerPreferenceMigration(client: PGlite): Promise<void> {
+  const inspect = async () => {
+    const result = await client.query<{
+      data_type: string
+      is_nullable: string
+      column_default: string | null
+    }>(`
+      select data_type, is_nullable, column_default
+      from information_schema.columns
+      where table_schema = 'public'
+        and table_name = 'profiles'
+        and column_name = 'job_timer_enabled'
+    `)
+    return {
+      column: result.rows[0] ?? null,
+      activityConstraint: await ticketActivityKindConstraint(client),
+    }
+  }
+  const complete = (markers: Awaited<ReturnType<typeof inspect>>) => (
+    markers.column?.data_type === 'boolean'
+      && markers.column.is_nullable === 'NO'
+      && markers.column.column_default === 'false'
+      && (
+        exactTicketActivityKindConstraint(
+          markers.activityConstraint,
+          TICKET_ACTIVITY_KIND_PRE_CORRECTION_DEFINITION,
+        )
+        || exactTicketActivityKindConstraint(
+          markers.activityConstraint,
+          TICKET_ACTIVITY_KIND_COMPLETE_DEFINITION,
+        )
+      )
+  )
+
+  const before = await inspect()
+  if (complete(before)) return
+  if (before.column !== null
+    || !exactTicketActivityKindConstraint(
+      before.activityConstraint,
+      TICKET_ACTIVITY_KIND_PRE_WORK_DEFINITION,
+    )) {
+    throw new Error('partial technician work schema in ephemeral database')
+  }
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0049a_shop_os_job_timer_preference.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+  if (!complete(await inspect())) throw new Error('technician work migration failed')
 }
 
 export async function ensureIntentAwareIntakeMigration(client: PGlite): Promise<void> {

@@ -140,6 +140,11 @@ export function TodayJobsBoard({
   const [claimSafetyBlocks, setClaimSafetyBlocks] = useState<Set<string>>(
     () => new Set(),
   )
+  const completedWorkJobIdsRef = useRef<Set<string>>(new Set())
+  const completedCloseAttempts = useRef<Set<string>>(new Set())
+  const [completedWorkJobIds, setCompletedWorkJobIds] = useState<Set<string>>(
+    () => new Set(),
+  )
   const [serverJobs, setServerJobs] = useState<TodayTicketJobs>(() => ({
     myJobs,
     openJobs,
@@ -539,9 +544,17 @@ export function TodayJobsBoard({
   }, [])
 
   function applyWorkProjection(job: TodayTicketJob, work: SimpleWorkProjectionView) {
-    // A completed job naturally leaves Today on the next refresh. Keep the
-    // mounted workspace stable until the technician closes it, rather than
-    // making the confirmation disappear mid-task.
+    if (work.status === 'done') {
+      if (completedWorkJobIdsRef.current.has(job.id)) return
+      const next = new Set(completedWorkJobIdsRef.current).add(job.id)
+      completedWorkJobIdsRef.current = next
+      setCompletedWorkJobIds(next)
+      setAnnouncement({
+        kind: 'status',
+        text: `Work complete for repair order ${job.ticketNumber}.`,
+      })
+      return
+    }
     if (work.status === 'open' || work.status === 'in_progress') {
       const workStatus: TodayTicketJob['workStatus'] = work.status
       setJobOverrides((current) => {
@@ -616,6 +629,29 @@ export function TodayJobsBoard({
   }
 
   function closeWork(job: TodayTicketJob) {
+    if (completedWorkJobIdsRef.current.has(job.id)) {
+      if (completedCloseAttempts.current.has(job.id)) return
+      completedCloseAttempts.current.add(job.id)
+      const completed = new Set(completedWorkJobIdsRef.current)
+      completed.delete(job.id)
+      completedWorkJobIdsRef.current = completed
+      setCompletedWorkJobIds(completed)
+      const withoutJob = (jobs: TodayTicketJob[]) => jobs.filter((candidate) => candidate.id !== job.id)
+      setServerJobs((current) => ({
+        ...current,
+        myJobs: withoutJob(current.myJobs),
+        openJobs: withoutJob(current.openJobs),
+        teamJobs: withoutJob(current.teamJobs),
+        createdJobs: withoutJob(current.createdJobs),
+        partsJobs: withoutJob(current.partsJobs),
+      }))
+      setJobOverrides((current) => {
+        if (!current.has(job.id)) return current
+        const next = new Map(current)
+        next.delete(job.id)
+        return next
+      })
+    }
     activeWorkspaceRef.current = false
     setActiveWorkJob(null)
     setFocusRequest({ kind: 'board', jobId: job.id })
@@ -775,6 +811,7 @@ export function TodayJobsBoard({
     onWorkStale: refreshStaleWorkTruth,
     onInterrupted: applyInterruptedWork,
     onResolveHold: applyResolvedHold,
+    completedWorkJobIds,
   }
 
   return (
@@ -1082,6 +1119,7 @@ function JobSection({
   onWorkStale,
   onInterrupted,
   onResolveHold,
+  completedWorkJobIds = new Set(),
 }: {
   label: string
   jobs: TodayTicketJob[]
@@ -1125,6 +1163,7 @@ function JobSection({
   onWorkStale?: (jobId: string) => void
   onInterrupted?: (job: TodayTicketJob, interrupted: InterruptionJobView) => void
   onResolveHold?: (job: TodayTicketJob, resolved: InterruptionJobView) => void
+  completedWorkJobIds?: ReadonlySet<string>
 }) {
   return (
     <div className={styles.group}>
@@ -1141,6 +1180,7 @@ function JobSection({
           >
             <JobRow
               job={job}
+              completed={completedWorkJobIds.has(job.id)}
               mode={mode}
               attentionNow={attentionNow}
               pending={pendingJobId === job.id}
@@ -1215,6 +1255,7 @@ function JobSection({
 
 function JobRow({
   job,
+  completed,
   mode,
   attentionNow,
   pending,
@@ -1245,6 +1286,7 @@ function JobRow({
   onResolveHold,
 }: {
   job: TodayTicketJob
+  completed: boolean
   mode: 'mine' | 'open' | 'team' | 'created' | 'parts'
   attentionNow: number | null
   pending: boolean
@@ -1291,7 +1333,7 @@ function JobRow({
       sessionId: job.sessionId,
       diagnosticsEntitled: diagnosticsEntitled ?? true,
     })
-  const readiness = (
+  const readiness = !completed && (
     mode === 'open' && !canDispatchWork
     || mode === 'mine' && role === 'tech'
   )
@@ -1342,7 +1384,7 @@ function JobRow({
         <div className={styles.facts}>
           <span>{titleCase[job.kind]}</span>
           <span>{tierLabel[job.requiredSkillTier] ?? `Tier ${job.requiredSkillTier}`}</span>
-          <span>{statusLabel[job.workStatus]}</span>
+          <span>{completed ? 'Complete' : statusLabel[job.workStatus]}</span>
           {/* Four facts at one weight rank nothing. The customer's answer is the
               only one that changes what you do next, so it is the only one that
               gets ink. */}
@@ -1368,7 +1410,7 @@ function JobRow({
         </div>
       </div>
       <div className={styles.action}>
-        {mode === 'open' && job.workStatus === 'open'
+        {completed ? null : mode === 'open' && job.workStatus === 'open'
           && (readiness?.state === 'claimable' || (canDispatchWork && !currentProfileId && job.canClaim))
           && (!canDispatchWork || !currentProfileId) ? (
           <button

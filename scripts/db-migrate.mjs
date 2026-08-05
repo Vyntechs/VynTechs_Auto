@@ -81,6 +81,31 @@ export function planMigrations({ files, applied }) {
 }
 
 /**
+ * Select the pending files an apply command is allowed to run.
+ *
+ * A production cutoff is intentionally stricter than a local cutoff: it may
+ * apply the one exact target file or do nothing. An unexpected older pending
+ * migration therefore fails before the ledger or application schema is touched.
+ */
+export function selectApplyMigrations({ files, pending, through, production }) {
+  if (production && !through) {
+    throw new Error('Production apply requires --through <filename-prefix>')
+  }
+  if (!through) return pending
+  const matches = files.filter((file) => file.name.startsWith(through))
+  if (matches.length === 0) throw new Error(`No migration matches --through ${through}`)
+  if (matches.length > 1) throw new Error(`Multiple migrations match --through ${through}`)
+  const target = matches[0]
+  const cutoff = files.findIndex((file) => file.name === target.name)
+  const allowedNames = new Set(files.slice(0, cutoff + 1).map((file) => file.name))
+  const selected = pending.filter((file) => allowedNames.has(file.name))
+  if (production && selected.some((file) => file.name !== target.name)) {
+    throw new Error(`Production cutoff ${through} would apply unexpected migrations`)
+  }
+  return selected
+}
+
+/**
  * The guard that makes this script safe to point at production. A database with
  * application tables and no ledger has a history nobody recorded; applying to it
  * would re-run migrations it already has.
@@ -209,7 +234,7 @@ async function commandBaseline(url, through) {
   })
 }
 
-async function commandApply(url) {
+async function commandApply(url, through, production) {
   const files = readMigrations()
   return withDatabase(url, async (sql) => {
     const state = await inspect(sql)
@@ -223,13 +248,15 @@ async function commandApply(url) {
     if (plan.missing.length > 0) {
       throw new Error(`Applied migrations are missing from disk: ${plan.missing.join(', ')}`)
     }
-    if (plan.pending.length === 0) {
+    const selected = selectApplyMigrations({ files, pending: plan.pending, through, production })
+    if (selected.length === 0) {
       process.stdout.write('apply — nothing pending\n')
       return plan
     }
 
+    for (const file of selected) process.stdout.write(`selected ${file.name}\n`)
     await withDatabase(url, async (ledger) => ledger.unsafe(CREATE_LEDGER_SQL))
-    for (const file of plan.pending) {
+    for (const file of selected) {
       await sql.begin(async (tx) => {
         await tx.unsafe(file.contents.replaceAll('--> statement-breakpoint', ''))
         await tx`
@@ -239,7 +266,7 @@ async function commandApply(url) {
       })
       process.stdout.write(`applied  ${file.name}\n`)
     }
-    process.stdout.write(`apply — ${plan.pending.length} applied\n`)
+    process.stdout.write(`apply — ${selected.length} applied\n`)
     return plan
   })
 }
@@ -268,7 +295,7 @@ async function main() {
 
   if (command === 'status') await commandStatus(url)
   else if (command === 'baseline') await commandBaseline(url, through)
-  else await commandApply(url)
+  else await commandApply(url, through, production)
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

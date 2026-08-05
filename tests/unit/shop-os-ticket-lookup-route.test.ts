@@ -45,6 +45,7 @@ const techProfile = {
   fullName: 'Tech',
   role: 'tech',
   skillTier: 2,
+  jobTimerEnabled: false,
   membershipStatus: 'active' as const,
   membershipActivatedAt: new Date(),
   isComp: false,

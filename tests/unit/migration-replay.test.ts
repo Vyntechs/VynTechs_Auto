@@ -19,10 +19,10 @@ import {
 
 const MIGRATIONS = path.join(process.cwd(), 'drizzle/migrations')
 const CORRECTION_MIGRATION = path.join(MIGRATIONS, '0051_shop_os_ticket_corrections.sql')
-const OLD_DEFINITION = "CHECK ((kind = ANY (ARRAY['work_paused'::text, 'work_resumed'::text, 'job_blocked'::text, 'job_hold_resolved'::text, 'job_reassigned'::text, 'job_handed_off'::text, 'ticket_canceled'::text, 'ticket_reopened'::text])))"
-const COMPLETE_DEFINITION = "CHECK ((kind = ANY (ARRAY['work_paused'::text, 'work_resumed'::text, 'job_blocked'::text, 'job_hold_resolved'::text, 'job_reassigned'::text, 'job_handed_off'::text, 'ticket_canceled'::text, 'ticket_reopened'::text, 'ticket_corrected'::text])))"
-const OLD_EXPRESSION = "kind in ('work_paused', 'work_resumed', 'job_blocked', 'job_hold_resolved', 'job_reassigned', 'job_handed_off', 'ticket_canceled', 'ticket_reopened')"
-const COMPLETE_EXPRESSION = "kind in ('work_paused', 'work_resumed', 'job_blocked', 'job_hold_resolved', 'job_reassigned', 'job_handed_off', 'ticket_canceled', 'ticket_reopened', 'ticket_corrected')"
+const OLD_DEFINITION = "CHECK ((kind = ANY (ARRAY['work_paused'::text, 'work_resumed'::text, 'work_completed'::text, 'job_blocked'::text, 'job_hold_resolved'::text, 'job_reassigned'::text, 'job_handed_off'::text, 'ticket_canceled'::text, 'ticket_reopened'::text])))"
+const COMPLETE_DEFINITION = "CHECK ((kind = ANY (ARRAY['work_paused'::text, 'work_resumed'::text, 'work_completed'::text, 'job_blocked'::text, 'job_hold_resolved'::text, 'job_reassigned'::text, 'job_handed_off'::text, 'ticket_canceled'::text, 'ticket_reopened'::text, 'ticket_corrected'::text])))"
+const OLD_EXPRESSION = "kind in ('work_paused', 'work_resumed', 'work_completed', 'job_blocked', 'job_hold_resolved', 'job_reassigned', 'job_handed_off', 'ticket_canceled', 'ticket_reopened')"
+const COMPLETE_EXPRESSION = "kind in ('work_paused', 'work_resumed', 'work_completed', 'job_blocked', 'job_hold_resolved', 'job_reassigned', 'job_handed_off', 'ticket_canceled', 'ticket_reopened', 'ticket_corrected')"
 
 type ConstraintState = {
   oid: number

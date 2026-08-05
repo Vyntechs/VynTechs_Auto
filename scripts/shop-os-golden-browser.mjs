@@ -546,19 +546,19 @@ async function runHermeticBrowserProjects(baseUrl, selectedProject, suiteName) {
   }
   const environment = technicianHandoffEnvironment(process.env, baseUrl)
   assertTechnicianHandoffHarnessSafety(environment, baseUrl)
-  const projects = selectedProject ? [selectedProject] : [...suite.projects]
-  for (const project of projects) {
-    const result = spawnSync(
-      join(REPO_ROOT, 'node_modules', '.bin', 'playwright'),
-      ['test', '--config', suite.config, '--project', project],
-      {
-        cwd: REPO_ROOT,
-        env: environment,
-        encoding: 'utf8',
-        stdio: 'inherit',
-      },
-    )
-    if (result.status !== 0) throw new Error(`${project} browser journey failed`)
+  const projectArgs = selectedProject ? ['--project', selectedProject] : []
+  const result = spawnSync(
+    join(REPO_ROOT, 'node_modules', '.bin', 'playwright'),
+    ['test', '--config', suite.config, ...projectArgs],
+    {
+      cwd: REPO_ROOT,
+      env: environment,
+      encoding: 'utf8',
+      stdio: 'inherit',
+    },
+  )
+  if (result.status !== 0) {
+    throw new Error(`${selectedProject ?? `${suiteName} phone and desktop`} browser journey failed`)
   }
 }
 

@@ -50,6 +50,7 @@ describe('ticket activity persistence contract', () => {
     expect(kinds).toEqual([
       'work_paused',
       'work_resumed',
+      'work_completed',
       'job_blocked',
       'job_hold_resolved',
       'job_reassigned',

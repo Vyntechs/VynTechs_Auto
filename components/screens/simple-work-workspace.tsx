@@ -9,8 +9,8 @@ import {
   activeDurationSeconds,
   formatDurationSeconds,
   parseEscalationResponse,
+  parseInlineSimpleWorkResponse,
   parseSimpleWorkMutationResponse,
-  parseSimpleWorkWorkspaceResponse,
   retainEscalationAttempt,
   type EscalationAttempt,
   type SimpleWorkProjectionView,
@@ -21,6 +21,7 @@ import type { PartRequestView } from '@/lib/shop-os/part-requests-ui'
 import {
   decodeSimpleWorkDraft,
   encodeSimpleWorkDraft,
+  legacySimpleWorkDraftStorageKey,
   simpleWorkDraftStorageKey,
   type SimpleWorkDraftValues,
 } from '@/lib/shop-os/simple-work-draft'
@@ -45,7 +46,13 @@ type Props = {
 }
 
 type Notice = { kind: 'status' | 'error'; text: string }
-type Pending = 'clock' | 'note' | 'complete' | 'escalation' | 'hold' | null
+type Pending = 'work' | 'clock' | 'complete' | 'escalation' | 'hold' | null
+type WorkIntent =
+  | { kind: 'start_work' }
+  | { kind: 'clock_on' }
+  | { kind: 'clock_off' }
+  | { kind: 'complete'; expectedDetail: string }
+type DetailConflict = { local: string; saved: string }
 
 const WORK_KIND_LABEL: Record<SimpleWorkWorkspaceView['kind'], string> = {
   diagnostic: 'Diagnostic',
@@ -81,6 +88,33 @@ function writeLocalDraft(key: string, value: string): void {
   }
 }
 
+function hasPartDraft(draft: PartRequestDraft): boolean {
+  return draft.description.trim().length > 0
+    || draft.preference.trim().length > 0
+    || draft.quantity !== '1'
+    || draft.requestKey !== null
+}
+
+function workspaceProjection(workspace: SimpleWorkWorkspaceView): SimpleWorkProjectionView {
+  return {
+    status: workspace.workStatus,
+    workNotes: workspace.workNotes,
+    startedAt: workspace.startedAt,
+    completedAt: workspace.completedAt,
+    clockedOnSince: workspace.clockedOnSince,
+    activeSeconds: workspace.activeSeconds,
+    updatedAt: workspace.updatedAt,
+    timerEnabled: workspace.timerEnabled,
+  }
+}
+
+function workspaceIntentSatisfied(work: SimpleWorkProjectionView, intent: WorkIntent): boolean {
+  if (intent.kind === 'start_work') return work.status === 'in_progress'
+  if (intent.kind === 'clock_on') return work.status === 'in_progress' && work.clockedOnSince !== null
+  if (intent.kind === 'clock_off') return work.status !== 'open' && work.clockedOnSince === null
+  return work.status === 'done' && work.workNotes === intent.expectedDetail
+}
+
 export function SimpleWorkWorkspace({
   actorProfileId,
   ticket,
@@ -95,7 +129,9 @@ export function SimpleWorkWorkspace({
 }: Props) {
   const router = useRouter()
   const [workspace, setWorkspace] = useState(initialWorkspace)
-  const [note, setNote] = useState(initialWorkspace.workNotes ?? '')
+  const [detail, setDetail] = useState(initialWorkspace.workNotes ?? '')
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailConflict, setDetailConflict] = useState<DetailConflict | null>(null)
   const [pending, setPending] = useState<Pending>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   const [stale, setStale] = useState(false)
@@ -109,29 +145,34 @@ export function SimpleWorkWorkspace({
   const [draftReady, setDraftReady] = useState(false)
   const escalationAttempt = useRef<EscalationAttempt | null>(null)
   const approvedScopeHeading = useRef<HTMLHeadingElement>(null)
+  const progressHeading = useRef<HTMLHeadingElement>(null)
+  const completionHeading = useRef<HTMLHeadingElement>(null)
   const staleHeading = useRef<HTMLHeadingElement>(null)
   const restoredDraftScope = useRef<string | null>(null)
   const basePath = `/api/tickets/${ticket.id}/jobs/${workspace.id}`
-  const hasOtherUnsavedDraft = note !== (workspace.workNotes ?? '')
+  const savedDetail = workspace.workNotes ?? ''
+  const hasOtherUnsavedDraft = detail !== savedDetail
+    || detailConflict !== null
     || concern.trim().length > 0
     || tier !== ''
     || partsDraftDirty
   const hasHoldDraft = holdKind !== '' || holdNote.trim().length > 0
-  const hasAuxiliaryDraft = concern.trim().length > 0
-    || tier !== ''
-    || partsDraftDirty
-    || hasHoldDraft
   const hasUnsavedDraft = hasOtherUnsavedDraft || hasHoldDraft
-  const draftScope = actorProfileId ? {
+  const draftScope = actorProfileId
+    && workspace.authorization === 'approved'
+    && workspace.workStatus !== 'done' ? {
     actorProfileId,
     ticketId: ticket.id,
     jobId: workspace.id,
-    workspaceUpdatedAt: workspace.updatedAt,
     workStatus: workspace.workStatus,
-    authorization: workspace.authorization,
+    authorization: 'approved' as const,
+    savedDetailBaseline: savedDetail,
   } : null
   const draftScopeKey = draftScope ? simpleWorkDraftStorageKey(draftScope) : null
-  const draftRevision = draftScopeKey ? `${draftScopeKey}:${workspace.updatedAt}` : null
+  const legacyDraftScopeKey = draftScope ? legacySimpleWorkDraftStorageKey(draftScope) : null
+  const draftRevision = draftScopeKey
+    ? JSON.stringify([draftScopeKey, workspace.workStatus, workspace.authorization, savedDetail])
+    : null
 
   useEffect(() => {
     if (!embedded) return
@@ -144,21 +185,48 @@ export function SimpleWorkWorkspace({
   }, [embedded, stale, workspace.authorization, workspace.id])
 
   useEffect(() => {
-    if (!draftScope || !draftScopeKey) {
+    if (workspace.workStatus === 'in_progress') progressHeading.current?.focus()
+    if (workspace.workStatus === 'done') completionHeading.current?.focus()
+  }, [workspace.workStatus])
+
+  useEffect(() => {
+    setDraftReady(false)
+    if (!draftScope || !draftScopeKey || !legacyDraftScopeKey) {
       restoredDraftScope.current = null
       setDraftReady(true)
       return
     }
-    const restored = decodeSimpleWorkDraft(readLocalDraft(draftScopeKey), draftScope)
-    if (!restored) {
+    const raw = readLocalDraft(draftScopeKey)
+    const legacyRaw = raw === null ? readLocalDraft(legacyDraftScopeKey) : null
+    const restored = decodeSimpleWorkDraft(raw, draftScope, legacyRaw)
+    if (restored.kind === 'invalid') {
       clearLocalDraft(draftScopeKey)
+      if (legacyRaw !== null) clearLocalDraft(legacyDraftScopeKey)
+      setDetail(savedDetail)
+      setDetailOpen(false)
+      setDetailConflict(null)
+    } else if (restored.kind === 'recovered' || restored.kind === 'conflict') {
+      const values = restored.values
+      setDetail(values.detail)
+      setDetailOpen(values.detailOpen)
+      setConcern(values.concern)
+      setTier(values.tier)
+      setPartsDraft(values.parts)
+      setPartsDraftDirty(hasPartDraft(values.parts))
+      setHoldKind(values.hold.kind)
+      setHoldNote(values.hold.note)
+      setDetailConflict(restored.kind === 'conflict'
+        ? { local: values.detail, saved: restored.currentSavedDetail }
+        : null)
+      if (restored.source === 'v1') {
+        const encoded = encodeSimpleWorkDraft(draftScope, values)
+        if (encoded) writeLocalDraft(draftScopeKey, encoded)
+        clearLocalDraft(legacyDraftScopeKey)
+      }
     } else {
-      setNote(restored.note)
-      setConcern(restored.concern)
-      setTier(restored.tier)
-      setPartsDraft(restored.parts)
-      setHoldKind(restored.hold.kind)
-      setHoldNote(restored.hold.note)
+      setDetail(savedDetail)
+      setDetailOpen(false)
+      setDetailConflict(null)
     }
     restoredDraftScope.current = draftRevision
     setDraftReady(true)
@@ -166,10 +234,11 @@ export function SimpleWorkWorkspace({
     actorProfileId,
     draftRevision,
     draftScopeKey,
+    legacyDraftScopeKey,
+    savedDetail,
     ticket.id,
     workspace.authorization,
     workspace.id,
-    workspace.updatedAt,
     workspace.workStatus,
   ])
 
@@ -177,16 +246,20 @@ export function SimpleWorkWorkspace({
     if (!draftScope || !draftScopeKey || !draftRevision || !draftReady || restoredDraftScope.current !== draftRevision) return
     if (workspace.workStatus !== 'in_progress' || workspace.authorization !== 'approved') {
       clearLocalDraft(draftScopeKey)
+      if (legacyDraftScopeKey) clearLocalDraft(legacyDraftScopeKey)
       return
     }
+    if (detailConflict) return
     const values: SimpleWorkDraftValues = {
-      note,
+      detail,
+      detailOpen,
       concern,
       tier,
       parts: partsDraft,
       hold: { kind: holdKind as SimpleWorkDraftValues['hold']['kind'], note: holdNote },
     }
-    const hasDraft = note !== (workspace.workNotes ?? '')
+    const hasDraft = detailOpen
+      || detail !== savedDetail
       || concern.trim().length > 0
       || tier !== ''
       || partsDraft.description.trim().length > 0
@@ -201,27 +274,33 @@ export function SimpleWorkWorkspace({
     else clearLocalDraft(draftScopeKey)
   }, [
     concern,
+    detail,
+    detailConflict,
+    detailOpen,
     draftReady,
     draftScope,
     draftScopeKey,
     draftRevision,
     holdKind,
     holdNote,
-    note,
+    legacyDraftScopeKey,
     partsDraft,
     partsDraftDirty,
     tier,
     workspace.authorization,
-    workspace.workNotes,
     workspace.workStatus,
+    savedDetail,
   ])
 
   function clearDraft(): void {
     if (draftScopeKey) clearLocalDraft(draftScopeKey)
+    if (legacyDraftScopeKey) clearLocalDraft(legacyDraftScopeKey)
   }
 
   function discardLocalDraft(): void {
-    setNote(workspace.workNotes ?? '')
+    setDetail(savedDetail)
+    setDetailOpen(false)
+    setDetailConflict(null)
     setConcern('')
     setTier('')
     setCreatedConcern(false)
@@ -246,7 +325,7 @@ export function SimpleWorkWorkspace({
     onClose?.()
   }
 
-  function applyWork(work: SimpleWorkProjectionView) {
+  function applyWork(work: SimpleWorkProjectionView, intent: WorkIntent) {
     setWorkspace((current) => ({
       ...current,
       workStatus: work.status,
@@ -256,9 +335,27 @@ export function SimpleWorkWorkspace({
       clockedOnSince: work.clockedOnSince,
       activeSeconds: work.activeSeconds,
       updatedAt: work.updatedAt,
+      timerEnabled: work.timerEnabled,
     }))
-    setNote(work.workNotes ?? '')
+    if (intent.kind === 'complete') {
+      setDetail(work.workNotes ?? '')
+      setDetailOpen(false)
+      setDetailConflict(null)
+      clearDraft()
+    }
     onProjection?.(work)
+  }
+
+  function applyWorkspaceTruth(next: SimpleWorkWorkspaceView): void {
+    const localWasChanged = detail !== savedDetail
+    if (localWasChanged && (next.workNotes ?? '') !== savedDetail) {
+      setDetailConflict({ local: detail, saved: next.workNotes ?? '' })
+      setDetailOpen(true)
+    } else if (!localWasChanged) {
+      setDetail(next.workNotes ?? '')
+    }
+    setWorkspace(next)
+    onProjection?.(workspaceProjection(next))
   }
 
   function stalePage() {
@@ -300,10 +397,29 @@ export function SimpleWorkWorkspace({
       return null
     }
     const body = await response.json().catch(() => null)
-    const next = response.ok ? parseSimpleWorkWorkspaceResponse(body) : null
-    if (!next) return null
-    setWorkspace(next)
-    return next
+    const next = response.ok ? parseInlineSimpleWorkResponse(body) : null
+    return next?.workspace ?? null
+  }
+
+  async function reconcileWork(intent: WorkIntent, success: string): Promise<void> {
+    const current = await refreshWorkspace().catch(() => null)
+    if (!current) {
+      setNotice({ kind: 'error', text: "Couldn't confirm what happened. Your draft is still here; retry when the connection is steady." })
+      return
+    }
+    if (workspaceIntentSatisfied(workspaceProjection(current), intent)) {
+      applyWorkspaceTruth(current)
+      if (intent.kind === 'complete') {
+        setDetail(current.workNotes ?? '')
+        setDetailOpen(false)
+        setDetailConflict(null)
+        clearDraft()
+      }
+      setNotice({ kind: 'status', text: success })
+      return
+    }
+    applyWorkspaceTruth(current)
+    setNotice({ kind: 'error', text: "Couldn't confirm what happened. Current shop truth is shown and your draft is still here." })
   }
 
   async function mutateWork(
@@ -311,6 +427,7 @@ export function SimpleWorkWorkspace({
     mode: Exclude<Pending, 'escalation' | null>,
     busy: string,
     success: string,
+    intent: WorkIntent,
   ) {
     if (pending) return
     setPending(mode)
@@ -327,18 +444,18 @@ export function SimpleWorkWorkspace({
       }
       const body = await response.json().catch(() => null)
       const result = response.ok ? parseSimpleWorkMutationResponse(body) : null
-      if (!result) {
-        if (response.status === 409) {
-          await refreshWorkspace().catch(() => null)
-          setNotice({ kind: 'error', text: 'Work changed elsewhere. Review the current state and try again.' })
-          return
-        }
-        throw new Error('invalid_response')
+      if (result && workspaceIntentSatisfied(result.work, intent)) {
+        applyWork(result.work, intent)
+        setNotice({ kind: 'status', text: success })
+        return
       }
-      applyWork(result.work)
-      setNotice({ kind: 'status', text: success })
+      if (response.status >= 400 && response.status < 500 && response.status !== 409) {
+        setNotice({ kind: 'error', text: 'That action was refused. Review the current work and try again.' })
+        return
+      }
+      await reconcileWork(intent, success)
     } catch {
-      setNotice({ kind: 'error', text: 'Not saved — check your connection and retry.' })
+      await reconcileWork(intent, success)
     } finally {
       setPending(null)
     }
@@ -401,7 +518,7 @@ export function SimpleWorkWorkspace({
       return
     }
     if (hasOtherUnsavedDraft) {
-      setNotice({ kind: 'error', text: 'Save or clear the open draft before placing work on hold.' })
+      setNotice({ kind: 'error', text: 'Clear the open draft before placing work on hold.' })
       return
     }
     setPending('hold')
@@ -438,8 +555,36 @@ export function SimpleWorkWorkspace({
     }
   }
 
-  const completeReady = workspace.workStatus === 'in_progress'
-    && Boolean(workspace.workNotes?.trim())
+  const normalizedDetail = detail.trim()
+  const hasNewDetail = detailOpen && normalizedDetail.length > 0 && detail !== savedDetail
+  const completionBlocker = detailConflict
+    ? 'Choose which detail to keep before completing.'
+    : partsDraftDirty
+      ? 'Finish or clear the parts draft before completing.'
+      : concern.trim().length > 0 || tier !== ''
+        ? 'Finish or clear the found-concern draft before completing.'
+        : hasHoldDraft
+          ? 'Finish or clear the hold draft before completing.'
+          : null
+
+  function completeWork(): void {
+    if (completionBlocker) return
+    const completion = hasNewDetail
+      ? { kind: 'with_details' as const, details: normalizedDetail }
+      : { kind: 'as_approved' as const }
+    const expectedDetail = completion.kind === 'with_details'
+      ? completion.details
+      : savedDetail.trim().length > 0
+        ? savedDetail
+        : 'Completed as approved.'
+    void mutateWork(
+      { action: 'complete', expectedUpdatedAt: workspace.updatedAt, completion },
+      'complete',
+      'Completing…',
+      'Work completed.',
+      { kind: 'complete', expectedDetail },
+    )
+  }
 
   const Root = embedded ? 'section' : 'main'
   return (
@@ -468,8 +613,8 @@ export function SimpleWorkWorkspace({
         {workspace.workStatus === 'done' ? (
           <section className={styles.state} aria-labelledby="work-complete">
             <p className={styles.stateMark}>Complete</p>
-            <h2 id="work-complete">Work complete</h2>
-            <p className={styles.savedNote}>{workspace.workNotes ?? 'No work note recorded.'}</p>
+            <h2 ref={completionHeading} id="work-complete" tabIndex={-1}>Work complete</h2>
+            <p className={styles.savedNote}>{workspace.workNotes ?? 'Completed as approved.'}</p>
             <JobClock
               clockedOnSince={workspace.clockedOnSince}
               activeSeconds={workspace.activeSeconds}
@@ -484,52 +629,95 @@ export function SimpleWorkWorkspace({
           <section className={styles.state} aria-labelledby="ready-heading">
             <p className={styles.stateMark}>Ready</p>
             <h2 id="ready-heading">Approved and ready</h2>
-            <p>Clock on when you start working it. You can be clocked on to more than one job at a time.</p>
+            <p>Start when you begin the approved job. Personal job timing follows your setting.</p>
             <button className={styles.primary} type="button" disabled={pending !== null}
-              onClick={() => mutateWork({ action: 'clock_on' }, 'clock', 'Clocking on…', 'Clocked on.')}>
-              {pending === 'clock' ? 'Clocking on…' : 'Clock on'}
+              onClick={() => mutateWork(
+                { action: 'start_work', expectedUpdatedAt: workspace.updatedAt },
+                'work',
+                'Starting work…',
+                'Work started.',
+                { kind: 'start_work' },
+              )}>
+              {pending === 'work' ? 'Starting work…' : 'Start work'}
             </button>
           </section>
         ) : (
           <>
             <section className={styles.state} aria-labelledby="progress-heading">
               <p className={styles.stateMark}>Now</p>
-              <h2 id="progress-heading">Work in progress</h2>
-              <JobClock
-                clockedOnSince={workspace.clockedOnSince}
-                activeSeconds={workspace.activeSeconds}
-                completedAt={null}
-              />
-              <button className={styles.primary} type="button" disabled={pending !== null}
-                onClick={() => workspace.clockedOnSince
-                  ? mutateWork({ action: 'clock_off' }, 'clock', 'Clocking off…', 'Clocked off. Time saved.')
-                  : mutateWork({ action: 'clock_on' }, 'clock', 'Clocking on…', 'Clocked back on.')}>
-                {pending === 'clock' ? 'Saving…' : workspace.clockedOnSince ? 'Clock off' : 'Clock back on'}
-              </button>
+              <h2 ref={progressHeading} id="progress-heading" tabIndex={-1}>Work in progress</h2>
+              {(workspace.timerEnabled || workspace.clockedOnSince || workspace.activeSeconds > 0) && (
+                <JobClock
+                  clockedOnSince={workspace.clockedOnSince}
+                  activeSeconds={workspace.activeSeconds}
+                  completedAt={null}
+                />
+              )}
+              {(workspace.timerEnabled || workspace.clockedOnSince) && (
+                <div className={styles.timerTool}>
+                  <p className={styles.helper}>Personal job time only. Not payroll or a performance score.</p>
+                  <button className={styles.secondary} type="button" disabled={pending !== null}
+                    onClick={() => workspace.clockedOnSince
+                      ? mutateWork(
+                        { action: 'clock_off' },
+                        'clock',
+                        'Clocking off…',
+                        'Clocked off. Time saved.',
+                        { kind: 'clock_off' },
+                      )
+                      : mutateWork(
+                        { action: 'clock_on' },
+                        'clock',
+                        'Clocking on…',
+                        'Clocked on.',
+                        { kind: 'clock_on' },
+                      )}>
+                    {pending === 'clock' ? 'Saving…' : workspace.clockedOnSince ? 'Clock off' : 'Clock on'}
+                  </button>
+                </div>
+              )}
             </section>
-            <section className={styles.module} aria-labelledby="note-heading">
-              <div className={styles.moduleHeading}><span>01</span><h2 id="note-heading">Work note</h2></div>
-              <label className={styles.label} htmlFor="work-note">Work note</label>
-              <textarea id="work-note" value={note} maxLength={2000} onChange={(event) => setNote(event.target.value)} />
-              <div className={styles.actionRow}>
-                <span>{note.length} / 2,000</span>
-                <button className={styles.secondary} type="button" disabled={pending !== null || note.trim().length < 1}
-                  onClick={() => mutateWork({ action: 'save_note', note, expectedUpdatedAt: workspace.updatedAt }, 'note', 'Saving note…', 'Work note saved.')}>
-                  {pending === 'note' ? 'Saving note…' : 'Save note'}
+            <section className={styles.module} aria-labelledby="work-rail-heading">
+              <div className={styles.moduleHeading}><span>01</span><h2 id="work-rail-heading">Finish this job</h2></div>
+              <p className={styles.helper}>The approved scope is the record. Add detail only when something extra is worth keeping.</p>
+              {detailConflict && (
+                <div className={styles.detailConflict} role="group" aria-label="Choose saved detail">
+                  <div><strong>Your detail</strong><p>{detailConflict.local || 'No extra detail.'}</p></div>
+                  <div><strong>Saved elsewhere</strong><p>{detailConflict.saved || 'No extra detail.'}</p></div>
+                  <div className={styles.actionRow}>
+                    <button className={styles.secondary} type="button" onClick={() => {
+                      setDetail(detailConflict.local); setDetailOpen(true); setDetailConflict(null)
+                    }}>Use my detail</button>
+                    <button className={styles.secondary} type="button" onClick={() => {
+                      setDetail(detailConflict.saved); setDetailOpen(detailConflict.saved.length > 0); setDetailConflict(null)
+                    }}>Use saved detail</button>
+                  </div>
+                </div>
+              )}
+              {detailOpen && !detailConflict && (
+                <div className={styles.detailField}>
+                  <label className={styles.label} htmlFor="work-detail">Anything worth recording? (optional)</label>
+                  <textarea id="work-detail" value={detail} maxLength={2000}
+                    onChange={(event) => setDetail(event.target.value)} />
+                  <span className={styles.detailCount}>{detail.length} / 2,000</span>
+                </div>
+              )}
+              {completionBlocker && <p className={styles.helper}>{completionBlocker}</p>}
+              <div className={styles.workRailActions}>
+                <button className={styles.primary} type="button"
+                  disabled={pending !== null || completionBlocker !== null}
+                  onClick={completeWork}>
+                  {pending === 'complete'
+                    ? 'Completing…'
+                    : hasNewDetail
+                      ? 'Complete with detail'
+                      : 'Complete as approved'}
                 </button>
+                {!detailOpen && !detailConflict && (
+                  <button className={styles.secondary} type="button" disabled={pending !== null}
+                    onClick={() => setDetailOpen(true)}>Add detail</button>
+                )}
               </div>
-            </section>
-            <section className={styles.module} aria-labelledby="complete-heading">
-              <div className={styles.moduleHeading}><span>02</span><h2 id="complete-heading">Complete work</h2></div>
-              <p className={styles.helper}>
-                {hasAuxiliaryDraft
-                  ? 'Finish or clear what you started above first.'
-                  : 'Save a work note first.'}
-              </p>
-              <button className={styles.primary} type="button" disabled={pending !== null || !completeReady || hasAuxiliaryDraft}
-                onClick={() => mutateWork({ action: 'complete', expectedUpdatedAt: workspace.updatedAt }, 'complete', 'Completing…', 'Work completed.')}>
-                {pending === 'complete' ? 'Completing…' : 'Complete work'}
-              </button>
             </section>
             <PartsNeededPanel
               ticketId={ticket.id}
@@ -557,7 +745,7 @@ export function SimpleWorkWorkspace({
                 </select>
                 <label className={styles.label} htmlFor="hold-note">What needs to happen next?</label>
                 <textarea id="hold-note" value={holdNote} maxLength={500} onChange={(event) => setHoldNote(event.target.value)} />
-                {hasOtherUnsavedDraft && <p className={styles.helper}>Save or clear the open draft before placing work on hold.</p>}
+                {hasOtherUnsavedDraft && <p className={styles.helper}>Clear the open draft before placing work on hold.</p>}
                 <button className={styles.secondary} type="submit" disabled={pending !== null || hasOtherUnsavedDraft || holdKind === '' || holdNote.trim().length < 1}>
                   {pending === 'hold' ? 'Placing on hold…' : 'Put work on hold'}
                 </button>

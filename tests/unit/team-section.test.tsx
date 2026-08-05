@@ -17,6 +17,7 @@ const members = [
     skillTier: 3,
     membershipStatus: 'active',
     deactivated: false,
+    jobTimerEnabled: false,
   },
   {
     userId: 'advisor-1',
@@ -26,6 +27,7 @@ const members = [
     skillTier: null,
     membershipStatus: 'active',
     deactivated: false,
+    jobTimerEnabled: false,
   },
   {
     userId: 'parts-pending',
@@ -35,6 +37,7 @@ const members = [
     skillTier: 1,
     membershipStatus: 'pending',
     deactivated: false,
+    jobTimerEnabled: false,
   },
 ]
 
@@ -95,5 +98,98 @@ describe('TeamSection Shop OS roles', () => {
   it('labels an unaccepted invitation as pending rather than active', () => {
     render(<TeamSection members={members} currentUserId="owner-1" />)
     expect(screen.getByText('Invite pending')).toBeInTheDocument()
+  })
+
+  it('offers per-person timing only for active teammates who wrench', () => {
+    render(<TeamSection members={members} currentUserId="owner-1" />)
+
+    expect(
+      screen.getByRole('checkbox', { name: "Track time on Olivia Owner's jobs" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('checkbox', { name: "Track time on Alex Advisor's jobs" }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('checkbox', { name: "Track time on Pat Pending's jobs" }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText(/all technicians/i)).not.toBeInTheDocument()
+  })
+
+  it('saves an eligible teammate timer preference only after a deliberate action', async () => {
+    const user = userEvent.setup()
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          preference: { profileId: 'profile-1', enabled: true },
+        }),
+        { status: 200 },
+      ),
+    )
+    render(<TeamSection members={members} currentUserId="owner-1" />)
+
+    await user.click(
+      screen.getByRole('checkbox', { name: "Track time on Olivia Owner's jobs" }),
+    )
+    expect(fetch).not.toHaveBeenCalled()
+
+    await user.click(
+      screen.getByRole('button', { name: 'Save time tracking for Olivia Owner' }),
+    )
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/team/job-timer',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ profileId: 'profile-1', enabled: true }),
+      }),
+    )
+    expect(await screen.findByText('Saved')).toBeInTheDocument()
+  })
+
+  it('makes the owner save role and tier changes before changing time tracking', async () => {
+    const user = userEvent.setup()
+    render(<TeamSection members={members} currentUserId="owner-1" />)
+
+    await user.selectOptions(screen.getByLabelText('Skill tier for Olivia Owner'), '2')
+
+    expect(
+      screen.getByRole('checkbox', { name: "Track time on Olivia Owner's jobs" }),
+    ).toBeDisabled()
+    expect(
+      screen.getByText('Save role and skill tier before changing time tracking.'),
+    ).toBeInTheDocument()
+  })
+
+  it('reconciles an uncertain teammate save against the exact persisted value', async () => {
+    const user = userEvent.setup()
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(null, { status: 409 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            preference: { profileId: 'profile-1', enabled: false },
+          }),
+          { status: 200 },
+        ),
+      )
+    render(<TeamSection members={members} currentUserId="owner-1" />)
+
+    await user.click(
+      screen.getByRole('checkbox', { name: "Track time on Olivia Owner's jobs" }),
+    )
+    await user.click(
+      screen.getByRole('button', { name: 'Save time tracking for Olivia Owner' }),
+    )
+
+    await screen.findByText('The change did not land. Current setting restored.')
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      '/api/team/job-timer?profileId=profile-1',
+      expect.objectContaining({ method: 'GET', cache: 'no-store' }),
+    )
+    expect(
+      screen.getByRole('checkbox', { name: "Track time on Olivia Owner's jobs" }),
+    ).not.toBeChecked()
+    expect(screen.queryByText('Saved')).not.toBeInTheDocument()
   })
 })

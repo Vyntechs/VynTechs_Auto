@@ -858,9 +858,9 @@ describe('TicketDetailScreen', () => {
     />)
 
     expect(screen.queryByRole('link', { name: 'Open work' })).toBeNull()
-    await user.click(screen.getByRole('button', { name: 'Review & clock on' }))
+    await user.click(screen.getByRole('button', { name: 'Review & start work' }))
     expect(screen.getByRole('region', { name: 'Inline work workspace' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Review & clock on' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Review & start work' })).toBeDisabled()
     expect(screen.getByText('Steering wheel shakes under braking from highway speed.')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Publish found concern' }))
@@ -869,7 +869,7 @@ describe('TicketDetailScreen', () => {
 
     await user.click(screen.getByRole('button', { name: 'Publish work state' }))
     expect(screen.getByText('Finished')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /^(Review & clock on|Continue work)$/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^(Review & start work|Continue work)$/ })).toBeNull()
 
     await user.click(screen.getByRole('button', { name: 'Close work' }))
     expect(screen.queryByRole('region', { name: 'Inline work workspace' })).toBeNull()
@@ -938,7 +938,7 @@ describe('TicketDetailScreen', () => {
       })] })}
     />)
 
-    expect(screen.getByRole('button', { name: 'Review & clock on' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Review & start work' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /diagnosis/i })).toBeNull()
   })
 
@@ -955,7 +955,7 @@ describe('TicketDetailScreen', () => {
       diagnosticsEntitled
       ticket={ticket({ jobs: [diagnostic] })}
     />)
-    expect(screen.queryByRole('button', { name: 'Review & clock on' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Review & start work' })).toBeNull()
 
     rerender(<TicketDetailScreen
       role="tech"
@@ -964,7 +964,7 @@ describe('TicketDetailScreen', () => {
       diagnosticsEntitled={false}
       ticket={ticket({ jobs: [{ ...diagnostic, sessionId: 'session-1' }] })}
     />)
-    expect(screen.queryByRole('button', { name: 'Review & clock on' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Review & start work' })).toBeNull()
   })
 
   it('keeps an assigned technician in the waiting handoff instead of price-building', () => {
@@ -1016,7 +1016,7 @@ describe('TicketDetailScreen', () => {
     />)
 
     expect(screen.getByText('Running work').closest('li')).toHaveTextContent('Clock running since')
-    expect(screen.getByText('Paused work').closest('li')).toHaveTextContent('Clock paused')
+    expect(screen.getByText('Paused work').closest('li')).toHaveTextContent('Work in progress')
   })
 
   it('exposes no dead simple-work link when customer or vehicle identity is incomplete', () => {

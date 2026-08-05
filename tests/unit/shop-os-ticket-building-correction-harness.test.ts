@@ -36,8 +36,8 @@ import {
 const uuid = (suffix: number) =>
   `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
 
-const OLD_EXPRESSION = "kind in ('work_paused', 'work_resumed', 'job_blocked', 'job_hold_resolved', 'job_reassigned', 'job_handed_off', 'ticket_canceled', 'ticket_reopened')"
-const COMPLETE_DEFINITION = "CHECK ((kind = ANY (ARRAY['work_paused'::text, 'work_resumed'::text, 'job_blocked'::text, 'job_hold_resolved'::text, 'job_reassigned'::text, 'job_handed_off'::text, 'ticket_canceled'::text, 'ticket_reopened'::text, 'ticket_corrected'::text])))"
+const OLD_EXPRESSION = "kind in ('work_paused', 'work_resumed', 'work_completed', 'job_blocked', 'job_hold_resolved', 'job_reassigned', 'job_handed_off', 'ticket_canceled', 'ticket_reopened')"
+const COMPLETE_DEFINITION = "CHECK ((kind = ANY (ARRAY['work_paused'::text, 'work_resumed'::text, 'work_completed'::text, 'job_blocked'::text, 'job_hold_resolved'::text, 'job_reassigned'::text, 'job_handed_off'::text, 'ticket_canceled'::text, 'ticket_reopened'::text, 'ticket_corrected'::text])))"
 
 async function constraintState(client: Awaited<ReturnType<typeof createTestDb>>['client']) {
   const result = await client.query<{

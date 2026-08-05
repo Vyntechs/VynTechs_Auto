@@ -1574,7 +1574,7 @@ describe('ManualQuoteBuilder line mutations', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
 
     const refresh = await screen.findByRole('button', { name: 'Refresh quote' })
-    expect(refresh).toHaveFocus()
+    await waitFor(() => expect(refresh).toHaveFocus())
     expect(screen.getByLabelText('Description')).toHaveValue('Locally edited')
     expect(screen.getByRole('button', { name: 'Save line' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
