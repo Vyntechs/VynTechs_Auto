@@ -322,7 +322,7 @@ describe('ManualQuoteBuilder', () => {
     expect(screen.queryByRole('main')).toBeNull()
     expect(screen.queryByRole('link', { name: 'Back to repair order' })).toBeNull()
     expect(screen.getByRole('region', { name: 'Quote' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 2, name: 'Build quote' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: 'Build ticket' })).toBeInTheDocument()
     expect(onProjection).toHaveBeenCalledWith([{
       id: JOB_ID,
       workStatus: 'open',
@@ -345,6 +345,33 @@ describe('ManualQuoteBuilder', () => {
 
     const row = screen.getByRole('heading', { name: 'Replace rear brakes' }).closest('li')!
     await waitFor(() => expect(row).toHaveFocus())
+    expect(row).toHaveAttribute('data-active-job', 'true')
+    const jobHeadings = screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)
+    expect(jobHeadings).toEqual(['Replace front brakes', 'Replace rear brakes'])
+    expect(screen.getByText('Replace front brakes')).toBeInTheDocument()
+  })
+
+  it('renders current work before one honest Add work disclosure', async () => {
+    const user = userEvent.setup()
+    render(<ManualQuoteBuilder
+      ticket={ticket}
+      builder={builder({ activeVersion: null })}
+      cannedJobs={[cannedJob]}
+      cannedCatalogAvailable
+    />)
+
+    const currentJob = screen.getByRole('heading', { name: 'Replace front brakes' }).closest('li')!
+    const addWork = screen.getByText('Add work')
+    expect(addWork.tagName).toBe('SUMMARY')
+    expect(currentJob.compareDocumentPosition(addWork) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByRole('region', { name: 'Add repair' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Add diagnostic time' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Add canned job' })).toBeNull()
+
+    await user.click(addWork)
+    expect(screen.getByRole('region', { name: 'Add repair' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Add diagnostic time' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Add canned job' })).toBeInTheDocument()
   })
 
   it('requires an explicit discard before closing an unsaved embedded line', async () => {
@@ -639,13 +666,14 @@ describe('ManualQuoteBuilder', () => {
       jobs: [], activeVersion: null,
     })} />)
     expect(screen.getByText('No eligible jobs on this ticket.')).toBeInTheDocument()
-    expect(screen.getByText('Customer has not received this')).toBeInTheDocument()
+    expect(screen.getByText('No price yet')).toBeInTheDocument()
 
     rerender(<ManualQuoteBuilder ticket={ticket} builder={builder({
       jobs: [{ id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open', ...jobFacts, lines: [] }],
       activeVersion: null,
     })} />)
     expect(screen.getByText('No quote lines yet.')).toBeInTheDocument()
+    expect(screen.getByText('No price yet')).toBeInTheDocument()
   })
 
   it('selects safe fields instead of reflecting hidden data', () => {
@@ -744,6 +772,10 @@ describe('ManualQuoteBuilder canned application', () => {
     router.refresh.mockReset()
   })
 
+  function openAddWork() {
+    fireEvent.click(screen.getByText('Add work'))
+  }
+
   // A diagnostic template used to appear in this picker labelled "Maintenance"
   // and then refuse to apply, because a diagnostic job carries authorization and
   // is always written as its own approvable job. It now belongs to Add
@@ -769,6 +801,7 @@ describe('ManualQuoteBuilder canned application', () => {
         cannedJobs={[cannedJob, diagnosticTemplate]}
       />,
     )
+    openAddWork()
 
     const picker = screen.getByLabelText('Canned job')
     expect(within(picker).getByRole('option', { name: 'Oil service' })).toBeInTheDocument()
@@ -791,6 +824,7 @@ describe('ManualQuoteBuilder canned application', () => {
       summary: { subtotalCents: 15_500, taxableSubtotalCents: 0, taxCents: 0, totalCents: 15_500 },
     } satisfies SafeCannedJobTemplate
     render(<ManualQuoteBuilder ticket={ticket} builder={builder()} cannedJobs={[diagnosticOnly]} />)
+    openAddWork()
 
     expect(screen.queryByLabelText('Canned job')).not.toBeInTheDocument()
     expect(screen.getByText(/Nothing saved in the library yet/i)).toBeInTheDocument()
@@ -799,6 +833,7 @@ describe('ManualQuoteBuilder canned application', () => {
 
   it('previews exact selected lines and totals before an explicit add', () => {
     render(<ManualQuoteBuilder ticket={ticket} builder={builder()} cannedJobs={[cannedJob]} />)
+    openAddWork()
     fireEvent.change(screen.getByLabelText('Canned job'), { target: { value: CANNED_ID } })
     expect(screen.getByText('Maintenance · Tier 1')).toBeInTheDocument()
     expect(screen.getByText('Part · Qty 1 · Oil filter')).toBeInTheDocument()
@@ -820,6 +855,7 @@ describe('ManualQuoteBuilder canned application', () => {
       }))
       .mockResolvedValueOnce(response(200, { builder: nextBuilder }))
     render(<ManualQuoteBuilder ticket={ticket} builder={builder()} cannedJobs={[cannedJob]} />)
+    openAddWork()
     fireEvent.change(screen.getByLabelText('Canned job'), { target: { value: CANNED_ID } })
     fireEvent.click(screen.getByRole('button', { name: 'Add canned job' }))
     await screen.findByRole('heading', { name: 'Oil service' })
@@ -841,6 +877,7 @@ describe('ManualQuoteBuilder canned application', () => {
       job: { id: CANNED_JOB_ID, title: 'Different work', kind: 'maintenance', requiredSkillTier: 1, lineCount: 3 },
     }))
     render(<ManualQuoteBuilder ticket={ticket} builder={builder()} cannedJobs={[cannedJob]} />)
+    openAddWork()
     fireEvent.change(screen.getByLabelText('Canned job'), { target: { value: CANNED_ID } })
     fireEvent.click(screen.getByRole('button', { name: 'Add canned job' }))
     expect(await screen.findByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
@@ -859,6 +896,7 @@ describe('ManualQuoteBuilder canned application', () => {
       .mockResolvedValueOnce(response(201, applied))
       .mockResolvedValueOnce(response(200, { builder: builderWithAppliedCannedJob() }))
     render(<ManualQuoteBuilder ticket={ticket} builder={builder()} cannedJobs={[cannedJob]} />)
+    openAddWork()
     fireEvent.change(screen.getByLabelText('Canned job'), { target: { value: CANNED_ID } })
     const add = screen.getByRole('button', { name: 'Add canned job' })
     fireEvent.click(add)
@@ -881,6 +919,7 @@ describe('ManualQuoteBuilder canned application', () => {
         builder: builderWithAppliedCannedJob({ activeVersion: activeVersion() }),
       }))
     render(<ManualQuoteBuilder ticket={ticket} builder={builder()} cannedJobs={[cannedJob]} />)
+    openAddWork()
     fireEvent.change(screen.getByLabelText('Canned job'), { target: { value: CANNED_ID } })
     fireEvent.click(screen.getByRole('button', { name: 'Add canned job' }))
     expect(await screen.findByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
@@ -892,6 +931,7 @@ describe('ManualQuoteBuilder canned application', () => {
       .mockRejectedValueOnce(new Error('offline'))
       .mockResolvedValueOnce(response(409, { error: 'conflict', retryable: false }))
     render(<ManualQuoteBuilder ticket={ticket} builder={builder()} cannedJobs={[cannedJob]} />)
+    openAddWork()
     fireEvent.change(screen.getByLabelText('Canned job'), { target: { value: CANNED_ID } })
     const add = screen.getByRole('button', { name: 'Add canned job' })
     fireEvent.click(add)
@@ -910,6 +950,7 @@ describe('ManualQuoteBuilder canned application', () => {
       .mockResolvedValueOnce(response(409, { error: 'conflict', retryable: false }))
       .mockRejectedValueOnce(new Error('offline'))
     const view = render(<ManualQuoteBuilder ticket={ticket} builder={builder()} cannedJobs={[cannedJob]} />)
+    openAddWork()
     fireEvent.change(screen.getByLabelText('Canned job'), { target: { value: CANNED_ID } })
     fireEvent.click(screen.getByRole('button', { name: 'Add canned job' }))
     await screen.findByText('Quote or canned-job context changed. Refresh canned jobs and choose again.')
@@ -935,6 +976,7 @@ describe('ManualQuoteBuilder canned application', () => {
     const { rerender } = render(
       <ManualQuoteBuilder ticket={ticket} builder={builder()} cannedCatalogAvailable={false} />,
     )
+    openAddWork()
     expect(screen.getByText('Canned jobs unavailable')).toBeInTheDocument()
     expect(screen.queryByLabelText('Canned job')).toBeNull()
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response(201, {
@@ -1453,6 +1495,92 @@ describe('ManualQuoteBuilder line mutations', () => {
     expect(document.body.textContent).not.toMatch(/supplier cost|unit cost|vendor account/i)
   })
 
+  it('reveals persisted line facts before the exact earned money and Prepare capability', async () => {
+    const user = userEvent.setup()
+    const emptyJob = { ...builder().jobs[0], lines: [] }
+    const savedPart = line({
+      id: NEW_LINE_ID,
+      description: 'Front brake pads',
+      quantity: '1',
+      priceCents: 14_000,
+      taxable: true,
+    })
+    const savedLabor = line({
+      id: LABOR_LINE_ID,
+      kind: 'labor',
+      description: 'Install front brake pads',
+      quantity: '1',
+      priceCents: 18_750,
+      taxable: false,
+      partNumber: null,
+      brand: null,
+      coreChargeCents: null,
+      fitment: null,
+      laborHours: '1.25',
+      laborRateCents: 15_000,
+    })
+    const partTruth = builder({
+      activeVersion: null,
+      jobs: [{ ...emptyJob, lines: [savedPart] }],
+    })
+    const earnedTruth = builder({
+      activeVersion: null,
+      jobs: [{ ...emptyJob, lines: [savedPart, savedLabor] }],
+    })
+    vi.spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValueOnce('00000000-0000-4000-8000-000000000501')
+      .mockReturnValueOnce('00000000-0000-4000-8000-000000000502')
+      .mockReturnValue('00000000-0000-4000-8000-000000000503')
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(201, { changed: true, line: { id: NEW_LINE_ID } }))
+      .mockResolvedValueOnce(response(200, { builder: partTruth }))
+      .mockResolvedValueOnce(response(201, { changed: true, line: { id: LABOR_LINE_ID } }))
+      .mockResolvedValueOnce(response(200, { builder: earnedTruth }))
+
+    render(<ManualQuoteBuilder
+      ticket={ticket}
+      builder={builder({ activeVersion: null, jobs: [emptyJob] })}
+    />)
+    expect(screen.getByText('No quote lines yet.')).toBeInTheDocument()
+    expect(screen.queryByText('$0.00')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Prepare quote' })).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Add part' }))
+    await user.type(screen.getByLabelText('Description'), 'Front brake pads')
+    await user.clear(screen.getByLabelText('Quantity'))
+    await user.type(screen.getByLabelText('Quantity'), '1')
+    await user.type(screen.getByLabelText('Line price'), '140.00')
+    await user.click(screen.getByRole('button', { name: 'Save line' }))
+    await screen.findByText('Front brake pads')
+
+    await user.click(screen.getByRole('button', { name: 'Add labor' }))
+    await user.type(screen.getByLabelText('Description'), 'Install front brake pads')
+    await user.clear(screen.getByLabelText('Hours'))
+    await user.type(screen.getByLabelText('Hours'), '1.25')
+    await user.clear(screen.getByLabelText('Rate per hour'))
+    await user.type(screen.getByLabelText('Rate per hour'), '150.00')
+    await user.click(screen.getByRole('button', { name: 'Save line' }))
+    await screen.findByText('Install front brake pads')
+
+    const tape = screen.getByRole('complementary', { name: 'Quote totals' })
+    const facts = screen.getByText('Part · Qty 1')
+    const laborFacts = screen.getByText('Labor · 1.25 hr')
+    const subtotal = within(tape).getByText('Subtotal')
+    const taxable = within(tape).getByText('Taxable subtotal')
+    const tax = within(tape).getByText('Tax')
+    const total = within(tape).getByText('Total')
+    for (const [earlier, later] of [
+      [facts, laborFacts], [laborFacts, subtotal], [subtotal, taxable], [taxable, tax], [tax, total],
+    ] as Array<[HTMLElement, HTMLElement]>) {
+      expect(earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+    expect(within(tape).getByText('$327.50')).toBeInTheDocument()
+    expect(within(tape).getByText('$140.00')).toBeInTheDocument()
+    expect(within(tape).getByText('$11.55')).toBeInTheDocument()
+    expect(within(tape).getByText('$339.05')).toBeInTheDocument()
+    expect(within(tape).getByRole('button', { name: 'Prepare quote' })).toBeEnabled()
+  })
+
   it('creates with one retry key, waits for refreshed truth, and returns focus to the line', async () => {
     const empty = builder({
       jobs: [{ id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open', ...jobFacts, lines: [] }],
@@ -1538,7 +1666,8 @@ describe('ManualQuoteBuilder line mutations', () => {
     fireEvent.submit(screen.getByRole('button', { name: 'Saving…' }).closest('form') as HTMLFormElement)
 
     const tape = screen.getByRole('complementary', { name: 'Quote totals' })
-    expect(within(tape).getAllByText('$0.00')).toHaveLength(4)
+    expect(within(tape).getByText('No price yet')).toBeInTheDocument()
+    expect(within(tape).queryByText('$0.00')).toBeNull()
     expect(within(tape).queryByText('$100.00')).toBeNull()
     expect(fetch).toHaveBeenCalledTimes(1)
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
@@ -2048,7 +2177,7 @@ describe('ManualQuoteBuilder preparation', () => {
     return builder({ activeVersion: null, ...overrides })
   }
 
-  it('lists visible reasons and disables preparation until persisted truth is ready', () => {
+  it('keeps empty pricing quiet and disables preparation until persisted truth exists', () => {
     render(<ManualQuoteBuilder ticket={{ ...ticket, customer: null, vehicle: null }} builder={ready({
       ticket: { id: TICKET_ID, status: 'open', reconciled: false },
       configuration: {
@@ -2057,9 +2186,10 @@ describe('ManualQuoteBuilder preparation', () => {
       },
       jobs: [{ ...builder().jobs[0], lines: [] }],
     })} />)
-    expect(screen.getByText('Add customer and vehicle.')).toBeInTheDocument()
-    expect(screen.getByText('Configure a tax rate in shop settings.')).toBeInTheDocument()
-    expect(screen.getByText('Add at least one quote line.')).toBeInTheDocument()
+    expect(screen.getByText('No price yet')).toBeInTheDocument()
+    expect(screen.queryByText('Add customer and vehicle.')).toBeNull()
+    expect(screen.queryByText('Configure a tax rate in shop settings.')).toBeNull()
+    expect(screen.queryByText('Add at least one quote line.')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Prepare quote' })).toBeNull()
   })
 

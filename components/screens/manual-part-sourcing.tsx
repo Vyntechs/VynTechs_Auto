@@ -511,6 +511,15 @@ export function ManualPartSourcing({
             </fieldset>
           )}
 
+          <aside className={styles.plannedConnections} aria-label="Planned supplier connections, not live">
+            <p>Planned connections · not live</p>
+            <ul>
+              <li>O&apos;Reilly First Call</li>
+              <li>PartsTech</li>
+              <li>RepairLink</li>
+            </ul>
+          </aside>
+
           {diagnosisSeed ? (
             <aside className={styles.seed} aria-label="Starting point from locked diagnosis">
               <p>Starting point from locked diagnosis</p>

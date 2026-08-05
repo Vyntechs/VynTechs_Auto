@@ -151,6 +151,7 @@ export function ManualQuoteBuilder({
   const [confirmedTarget, setConfirmedTarget] = useState<string | null>(null)
   const [selectedCannedId, setSelectedCannedId] = useState<string | null>(null)
   const [cannedClientKey, setCannedClientKey] = useState<string | null>(null)
+  const [addWorkOpen, setAddWorkOpen] = useState(false)
   const [decision, setDecision] = useState<DecisionState | null>(null)
   const [accounts, setAccounts] = useState(vendorAccounts)
   const [sourcingJobId, setSourcingJobId] = useState<string | null>(null)
@@ -1373,7 +1374,7 @@ export function ManualQuoteBuilder({
           <p className={styles.eyebrow}>
             Repair order {String(ticket.ticketNumber).padStart(6, '0')}
           </p>
-          {embedded ? <h2>Build quote</h2> : <h1>Build quote</h1>}
+          {embedded ? <h2>Build ticket</h2> : <h1>Build quote</h1>}
           {ticket.customer && ticket.vehicle && (
             <p className={styles.identity}>
               <span>{ticket.customer.name}</span>
@@ -1432,80 +1433,6 @@ export function ManualQuoteBuilder({
             <p>{current.jobs.length} {current.jobs.length === 1 ? 'job' : 'jobs'}</p>
           </div>
 
-          {!cannedCatalogAvailable ? (
-            <div className={styles.cannedUnavailable} tabIndex={-1} ref={cannedUnavailableRef}>
-              <strong>Canned jobs unavailable</strong>
-              <p>You can still type the work in by hand. Refresh before using the library.</p>
-              <button type="button" className={styles.lineAction} onClick={reloadCannedPage}>
-                Refresh canned jobs
-              </button>
-            </div>
-          ) : quoteCannedJobs.length === 0 ? (
-            <p className={styles.cannedEmpty}>Nothing saved in the library yet. You can still type the work in by hand.</p>
-          ) : (
-            <section className={styles.cannedPicker} aria-labelledby="canned-job-heading">
-              <div>
-                <p className={styles.eyebrow}>Saved work</p>
-                <h3 id="canned-job-heading">Add canned job</h3>
-              </div>
-              <label htmlFor="quote-canned-job">Canned job</label>
-              <select
-                id="quote-canned-job"
-                ref={cannedSelectRef}
-                value={selectedCannedId ?? ''}
-                disabled={busy}
-                onChange={(event) => {
-                  setSelectedCannedId(event.target.value || null)
-                  setCannedClientKey(crypto.randomUUID())
-                  selectedFingerprintRef.current = quoteCannedJobs.find((job) => job.id === event.target.value)?.fingerprint ?? null
-                  setError(null)
-                }}
-              >
-                <option value="">Choose saved work</option>
-                {quoteCannedJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}
-              </select>
-              {selectedCannedJob && (
-                <div className={styles.cannedPreview} aria-live="polite">
-                  <p className={styles.cannedFacts}>
-                    {selectedCannedJob.kind === 'repair' ? 'Repair' : 'Maintenance'} · Tier {selectedCannedJob.defaultRequiredSkillTier}
-                  </p>
-                  <ul>
-                    {selectedCannedJob.lines.map((line, index) => (
-                      <li key={`${line.sort}:${index}:${line.description}`}>
-                        <span>{cannedLineLabel(line)} · {line.description}</span>
-                        <strong className={styles.money}>{formatMoneyCents(line.priceCents)}</strong>
-                      </li>
-                    ))}
-                  </ul>
-                  <dl>
-                    <div><dt>Subtotal</dt><dd className={styles.money}>{formatMoneyCents(selectedCannedJob.summary.subtotalCents)}</dd></div>
-                    <div><dt>Tax</dt><dd>{selectedCannedJob.summary.taxCents === null ? 'Not set' : formatMoneyCents(selectedCannedJob.summary.taxCents)}</dd></div>
-                    <div><dt>Total</dt><dd>{selectedCannedJob.summary.totalCents === null ? 'Unavailable' : formatMoneyCents(selectedCannedJob.summary.totalCents)}</dd></div>
-                  </dl>
-                  <button
-                    type="button"
-                    className={styles.cannedApply}
-                    disabled={busy || editor !== null || modal !== null || sourcingJob !== null}
-                    onClick={applyCannedJob}
-                  >
-                    {operation === 'canned' ? 'Adding…' : 'Add canned job'}
-                  </button>
-                </div>
-              )}
-            </section>
-          )}
-
-          <AddRepairJob
-            ticketId={ticket.id}
-            onAdded={() => { void refreshQuote() }}
-          />
-
-          <AddDiagnosticTime
-            ticketId={ticket.id}
-            templates={diagnosticTemplates}
-            onAdded={() => { void refreshQuote() }}
-          />
-
           {current.jobs.length === 0 ? (
             <p className={styles.empty}>No eligible jobs on this ticket.</p>
           ) : (
@@ -1514,6 +1441,7 @@ export function ManualQuoteBuilder({
                 <li
                   key={job.id}
                   className={styles.job}
+                  data-active-job={focusJobId === job.id ? 'true' : undefined}
                   data-change-state={confirmedTarget === `job:${job.id}` ? 'confirmed' : undefined}
                   tabIndex={-1}
                   ref={(element) => {
@@ -1705,6 +1633,88 @@ export function ManualQuoteBuilder({
               ))}
             </ol>
           )}
+
+          <details
+            className={styles.addWork}
+            onToggle={(event) => setAddWorkOpen(event.currentTarget.open)}
+          >
+            <summary>Add work</summary>
+            {addWorkOpen && <div className={styles.addWorkContent}>
+              {!cannedCatalogAvailable ? (
+                <div className={styles.cannedUnavailable} tabIndex={-1} ref={cannedUnavailableRef}>
+                  <strong>Canned jobs unavailable</strong>
+                  <p>You can still type the work in by hand. Refresh before using the library.</p>
+                  <button type="button" className={styles.lineAction} onClick={reloadCannedPage}>
+                    Refresh canned jobs
+                  </button>
+                </div>
+              ) : quoteCannedJobs.length === 0 ? (
+                <p className={styles.cannedEmpty}>Nothing saved in the library yet. You can still type the work in by hand.</p>
+              ) : (
+                <section className={styles.cannedPicker} aria-labelledby="canned-job-heading">
+                  <div>
+                    <p className={styles.eyebrow}>Saved work</p>
+                    <h3 id="canned-job-heading">Add canned job</h3>
+                  </div>
+                  <label htmlFor="quote-canned-job">Canned job</label>
+                  <select
+                    id="quote-canned-job"
+                    ref={cannedSelectRef}
+                    value={selectedCannedId ?? ''}
+                    disabled={busy}
+                    onChange={(event) => {
+                      setSelectedCannedId(event.target.value || null)
+                      setCannedClientKey(crypto.randomUUID())
+                      selectedFingerprintRef.current = quoteCannedJobs.find((job) => job.id === event.target.value)?.fingerprint ?? null
+                      setError(null)
+                    }}
+                  >
+                    <option value="">Choose saved work</option>
+                    {quoteCannedJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}
+                  </select>
+                  {selectedCannedJob && (
+                    <div className={styles.cannedPreview} aria-live="polite">
+                      <p className={styles.cannedFacts}>
+                        {selectedCannedJob.kind === 'repair' ? 'Repair' : 'Maintenance'} · Tier {selectedCannedJob.defaultRequiredSkillTier}
+                      </p>
+                      <ul>
+                        {selectedCannedJob.lines.map((line, index) => (
+                          <li key={`${line.sort}:${index}:${line.description}`}>
+                            <span>{cannedLineLabel(line)} · {line.description}</span>
+                            <strong className={styles.money}>{formatMoneyCents(line.priceCents)}</strong>
+                          </li>
+                        ))}
+                      </ul>
+                      <dl>
+                        <div><dt>Subtotal</dt><dd className={styles.money}>{formatMoneyCents(selectedCannedJob.summary.subtotalCents)}</dd></div>
+                        <div><dt>Tax</dt><dd>{selectedCannedJob.summary.taxCents === null ? 'Not set' : formatMoneyCents(selectedCannedJob.summary.taxCents)}</dd></div>
+                        <div><dt>Total</dt><dd>{selectedCannedJob.summary.totalCents === null ? 'Unavailable' : formatMoneyCents(selectedCannedJob.summary.totalCents)}</dd></div>
+                      </dl>
+                      <button
+                        type="button"
+                        className={styles.cannedApply}
+                        disabled={busy || editor !== null || modal !== null || sourcingJob !== null}
+                        onClick={applyCannedJob}
+                      >
+                        {operation === 'canned' ? 'Adding…' : 'Add canned job'}
+                      </button>
+                    </div>
+                  )}
+                </section>
+              )}
+
+              <AddRepairJob
+                ticketId={ticket.id}
+                onAdded={() => { void refreshQuote() }}
+              />
+
+              <AddDiagnosticTime
+                ticketId={ticket.id}
+                templates={diagnosticTemplates}
+                onAdded={() => { void refreshQuote() }}
+              />
+            </div>}
+          </details>
         </section>
 
         <QuoteCommitmentPanel

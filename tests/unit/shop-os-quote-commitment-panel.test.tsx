@@ -97,6 +97,24 @@ function primaryActions(): HTMLElement[] {
 }
 
 describe('QuoteCommitmentPanel', () => {
+  it('withholds zero money, version claims, and Prepare until a saved line earns a price', () => {
+    const builder = {
+      ...draftBuilder(),
+      jobs: [{ ...draftBuilder().jobs[0], lines: [] }],
+      draftCommitment: null,
+    }
+    renderPanel({
+      builder,
+      totals: summarizeQuoteMoney([], 825),
+      preparation: { kind: 'blocked', reasons: ['Add at least one quote line.'] },
+    })
+
+    expect(screen.getByText('No price yet')).toBeInTheDocument()
+    expect(screen.queryByText(/Subtotal|Tax|Total|Customer has not received/i)).toBeNull()
+    expect(screen.queryByText('$0.00')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Prepare/i })).toBeNull()
+  })
+
   it('shows exact never-prepared draft truth with one filled action', () => {
     renderPanel()
 

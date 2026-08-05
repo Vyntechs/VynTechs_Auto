@@ -50,6 +50,7 @@ export function QuoteCommitmentPanel({
   const lastPrepared = builder.lastPreparedVersion
   const revised = activeVersion === null && lastPrepared?.state === 'superseded'
   const canPrepare = builder.capabilities.canPrepareQuote
+  const hasSavedLines = builder.jobs.some((job) => job.lines.length > 0)
 
   useEffect(() => {
     if (confirmation) commitmentHeadingRef.current?.focus()
@@ -96,6 +97,10 @@ export function QuoteCommitmentPanel({
         </>
       ) : (
         <>
+          {!hasSavedLines ? (
+            <p className={styles.noPrice}>No price yet</p>
+          ) : (
+          <>
           {!totals.ok ? (
             <div className={styles.blocked}>
               <strong>Totals unavailable</strong>
@@ -189,6 +194,8 @@ export function QuoteCommitmentPanel({
               </button>
             </div>
           ) : null}
+          </>
+          )}
         </>
       )}
     </aside>
