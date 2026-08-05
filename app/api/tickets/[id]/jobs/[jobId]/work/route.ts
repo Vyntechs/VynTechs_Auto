@@ -12,13 +12,25 @@ import { getServerSupabase } from '@/lib/supabase-server'
 
 type RouteContext = { params: Promise<{ id: string; jobId: string }> }
 
+function noStoreJson(body: unknown, status: number) {
+  return NextResponse.json(body, {
+    status,
+    headers: { 'Cache-Control': 'no-store' },
+  })
+}
+
+function noStoreResponse(response: NextResponse) {
+  response.headers.set('Cache-Control', 'no-store')
+  return response
+}
+
 function failureResponse(result: SimpleWorkFailure) {
   const status = result.error === 'invalid_input' ? 400
     : result.error === 'not_found' ? 404
       : 409
-  return NextResponse.json(
+  return noStoreJson(
     { error: result.error, ...(result.retryable ? { retryable: true } : {}) },
-    { status },
+    status,
   )
 }
 
@@ -33,10 +45,10 @@ async function context() {
 
 export async function GET(_req: Request, { params }: RouteContext) {
   const ctx = await context()
-  if (!ctx) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+  if (!ctx) return noStoreJson({ error: 'unauthenticated' }, 401)
   const denied = await paywallReject(db, ctx.user.id)
-  if (denied) return denied
-  if (!ctx.profile.shopId) return NextResponse.json({ error: 'not_found' }, { status: 404 })
+  if (denied) return noStoreResponse(denied)
+  if (!ctx.profile.shopId) return noStoreJson({ error: 'not_found' }, 404)
   const { id, jobId } = await params
   const result = await getSimpleWorkWorkspace(db, {
     actor: { profileId: ctx.profile.id, shopId: ctx.profile.shopId },
@@ -48,20 +60,20 @@ export async function GET(_req: Request, { params }: RouteContext) {
     shopId: ctx.profile.shopId,
     jobId,
   })
-  return NextResponse.json({ workspace: result.workspace, partRequests }, { status: 200 })
+  return noStoreJson({ workspace: result.workspace, partRequests }, 200)
 }
 
 export async function POST(req: Request, { params }: RouteContext) {
   const ctx = await context()
-  if (!ctx) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+  if (!ctx) return noStoreJson({ error: 'unauthenticated' }, 401)
   const denied = await paywallReject(db, ctx.user.id)
-  if (denied) return denied
-  if (!ctx.profile.shopId) return NextResponse.json({ error: 'not_found' }, { status: 404 })
+  if (denied) return noStoreResponse(denied)
+  if (!ctx.profile.shopId) return noStoreJson({ error: 'not_found' }, 404)
   let body: unknown
   try {
     body = await req.json()
   } catch {
-    return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
+    return noStoreJson({ error: 'invalid_json' }, 400)
   }
   const { id, jobId } = await params
   const result = await mutateSimpleWork(db, {
@@ -71,6 +83,6 @@ export async function POST(req: Request, { params }: RouteContext) {
     body,
   })
   return result.ok
-    ? NextResponse.json({ changed: result.changed, work: result.work }, { status: 200 })
+    ? noStoreJson({ changed: result.changed, work: result.work }, 200)
     : failureResponse(result)
 }

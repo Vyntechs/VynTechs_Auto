@@ -107,6 +107,27 @@ describe('Shop OS approved simple work', () => {
 
   afterEach(async () => close())
 
+  async function currentWorkspace() {
+    const result = await getSimpleWorkWorkspace(db, { actor, ticketId, jobId })
+    if (!result.ok) throw new Error(`workspace unavailable: ${result.error}`)
+    return result.workspace
+  }
+
+  async function startWork() {
+    const workspace = await currentWorkspace()
+    const result = await mutateSimpleWork(db, {
+      actor,
+      ticketId,
+      jobId,
+      body: {
+        action: 'start_work',
+        expectedUpdatedAt: workspace.updatedAt,
+      },
+    })
+    if (!result.ok) throw new Error(`start failed: ${result.error}`)
+    return result
+  }
+
   it('generates monotonic timestamps from the locked database row without runtime Date parameters', () => {
     const query = new PgDialect().sqlToQuery(nextSimpleWorkTimestamp())
     expect(query.sql).toContain('"ticket_jobs"."updated_at"')
@@ -130,27 +151,131 @@ describe('Shop OS approved simple work', () => {
     expect(JSON.stringify(result)).not.toMatch(/price|cost|vendor/i)
   })
 
-  it('starts exact approved assigned simple work and replays without another write', async () => {
-    const first = await mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'clock_on' } })
-    expect(first).toMatchObject({ ok: true, changed: true, work: { status: 'in_progress' } })
-    const second = await mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'clock_on' } })
-    expect(second).toMatchObject({ ok: true, changed: false, work: { status: 'in_progress' } })
+  it('starts exact approved assigned work without a timer by default and replays without starting one later', async () => {
+    const workspace = await currentWorkspace()
+    const body = { action: 'start_work', expectedUpdatedAt: workspace.updatedAt }
+
+    const first = await mutateSimpleWork(db, { actor, ticketId, jobId, body })
+    expect(first).toMatchObject({
+      ok: true,
+      changed: true,
+      work: {
+        status: 'in_progress',
+        timerEnabled: false,
+        clockedOnSince: null,
+      },
+    })
+
+    await db.update(profiles)
+      .set({ jobTimerEnabled: true })
+      .where(eq(profiles.id, techId))
+    const second = await mutateSimpleWork(db, { actor, ticketId, jobId, body })
+    expect(second).toMatchObject({
+      ok: true,
+      changed: false,
+      work: {
+        status: 'in_progress',
+        timerEnabled: true,
+        clockedOnSince: null,
+      },
+    })
   })
 
-  it('completes work after an interruption restores it without losing the optimistic-lock timestamp', async () => {
-    const started = await mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'clock_on' } })
-    if (!started.ok) throw new Error('clock-on failed')
-    const noted = await mutateSimpleWork(db, {
+  it('starts the timer atomically only when the persisted preference and wrenching tier are effective', async () => {
+    await db.update(profiles)
+      .set({ jobTimerEnabled: true })
+      .where(eq(profiles.id, techId))
+    const started = await startWork()
+    expect(started).toMatchObject({
+      ok: true,
+      changed: true,
+      work: {
+        status: 'in_progress',
+        timerEnabled: true,
+      },
+    })
+    expect(started.work.clockedOnSince).not.toBeNull()
+    expect(started.work.startedAt).not.toBeNull()
+  })
+
+  it('ignores a stored timer preference for a non-wrenching actor and fails closed for inactive membership', async () => {
+    await db.update(profiles)
+      .set({ jobTimerEnabled: true, skillTier: null })
+      .where(eq(profiles.id, techId))
+    const started = await startWork()
+    expect(started).toMatchObject({
+      ok: true,
+      work: { timerEnabled: false, clockedOnSince: null },
+    })
+
+    await db.update(ticketJobs).set({
+      workStatus: 'open',
+      workStartedAt: null,
+      clockedOnSince: null,
+    }).where(eq(ticketJobs.id, jobId))
+    await db.update(profiles)
+      .set({
+        skillTier: 2,
+        membershipStatus: 'pending',
+        membershipActivatedAt: null,
+      })
+      .where(eq(profiles.id, techId))
+    await expect(mutateSimpleWork(db, {
       actor,
       ticketId,
       jobId,
       body: {
-        action: 'save_note',
-        note: 'Installed, torqued, and verified the customer-supplied lift kit.',
-        expectedUpdatedAt: started.work.updatedAt,
+        action: 'start_work',
+        expectedUpdatedAt: (await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0].updatedAt.toISOString(),
       },
+    })).resolves.toEqual({ ok: false, error: 'not_found' })
+
+    await db.update(profiles)
+      .set({
+        membershipStatus: 'active',
+        membershipActivatedAt: new Date(),
+        deactivatedAt: new Date(),
+      })
+      .where(eq(profiles.id, techId))
+    await expect(mutateSimpleWork(db, {
+      actor,
+      ticketId,
+      jobId,
+      body: {
+        action: 'start_work',
+        expectedUpdatedAt: (await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0].updatedAt.toISOString(),
+      },
+    })).resolves.toEqual({ ok: false, error: 'not_found' })
+  })
+
+  it('refuses a stale start revision with zero work or timer mutation', async () => {
+    await db.update(profiles)
+      .set({ jobTimerEnabled: true })
+      .where(eq(profiles.id, techId))
+    const staleUpdatedAt = (await currentWorkspace()).updatedAt
+    await db.update(ticketJobs)
+      .set({
+        title: 'Install approved lift kit',
+        updatedAt: new Date(new Date(staleUpdatedAt).getTime() + 1_000),
+      })
+      .where(eq(ticketJobs.id, jobId))
+
+    await expect(mutateSimpleWork(db, {
+      actor,
+      ticketId,
+      jobId,
+      body: { action: 'start_work', expectedUpdatedAt: staleUpdatedAt },
+    })).resolves.toEqual({ ok: false, error: 'conflict', retryable: true })
+    const [unchanged] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+    expect(unchanged).toMatchObject({
+      workStatus: 'open',
+      workStartedAt: null,
+      clockedOnSince: null,
     })
-    if (!noted.ok) throw new Error('save-note failed')
+  })
+
+  it('completes work after an interruption restores it without losing the optimistic-lock timestamp', async () => {
+    await startWork()
 
     const interruptionActor = {
       ...actor,
@@ -184,7 +309,14 @@ describe('Shop OS approved simple work', () => {
       actor,
       ticketId,
       jobId,
-      body: { action: 'complete', expectedUpdatedAt: restored.workspace.updatedAt },
+      body: {
+        action: 'complete',
+        expectedUpdatedAt: restored.workspace.updatedAt,
+        completion: {
+          kind: 'with_details',
+          details: 'Installed, torqued, and verified the customer-supplied lift kit.',
+        },
+      },
     })).resolves.toMatchObject({ ok: true, changed: true, work: { status: 'done' } })
   })
 
@@ -321,95 +453,220 @@ describe('Shop OS approved simple work', () => {
     })).resolves.toEqual({ ok: false, error: 'not_found' })
     await db.update(profiles).set({ isComp: false }).where(eq(profiles.id, techId))
 
-    await expect(getSimpleWorkWorkspace(db, {
+    const manualWorkspace = await getSimpleWorkWorkspace(db, {
       actor: manualActor,
       ticketId: manualTicketId,
       jobId: manualJobId,
-    })).resolves.toMatchObject({
+    })
+    expect(manualWorkspace).toMatchObject({
       ok: true,
       workspace: { kind: 'diagnostic', authorization: 'approved', workStatus: 'open' },
     })
+    if (!manualWorkspace.ok) throw new Error('manual workspace unavailable')
     await expect(mutateSimpleWork(db, {
       actor: manualActor,
       ticketId: manualTicketId,
       jobId: manualJobId,
-      body: { action: 'clock_on' },
+      body: {
+        action: 'start_work',
+        expectedUpdatedAt: manualWorkspace.workspace.updatedAt,
+      },
     })).resolves.toMatchObject({
       ok: true,
       changed: true,
-      work: { status: 'in_progress' },
+      work: { status: 'in_progress', timerEnabled: false, clockedOnSince: null },
     })
   })
 
   it('fails closed for stale assignment, inactive actor, missing event, or snapshot kind drift', async () => {
+    const expectedUpdatedAt = (await currentWorkspace()).updatedAt
+    const startBody = { action: 'start_work', expectedUpdatedAt }
     await db.update(ticketJobs).set({ assignedTechId: advisorId }).where(eq(ticketJobs.id, jobId))
-    await expect(mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'clock_on' } }))
+    await expect(mutateSimpleWork(db, { actor, ticketId, jobId, body: startBody }))
       .resolves.toEqual({ ok: false, error: 'not_found' })
     await db.update(ticketJobs).set({ assignedTechId: techId }).where(eq(ticketJobs.id, jobId))
     await db.update(profiles).set({ deactivatedAt: new Date() }).where(eq(profiles.id, techId))
-    await expect(mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'clock_on' } }))
+    await expect(mutateSimpleWork(db, { actor, ticketId, jobId, body: startBody }))
       .resolves.toEqual({ ok: false, error: 'not_found' })
     await db.update(profiles).set({ deactivatedAt: null }).where(eq(profiles.id, techId))
     await db.insert(quoteEvents).values({
       id: uuid(61), shopId, ticketId, jobId, quoteVersionId: versionId,
       kind: 'declined', actorProfileId: advisorId, approvedVia: null, requestKey: uuid(71),
     })
-    await expect(mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'clock_on' } }))
+    await expect(mutateSimpleWork(db, { actor, ticketId, jobId, body: startBody }))
       .resolves.toEqual({ ok: false, error: 'not_authorized' })
     await db.insert(quoteEvents).values({
       id: uuid(62), shopId, ticketId, jobId, quoteVersionId: versionId,
       kind: 'approved', actorProfileId: advisorId, approvedVia: 'phone', requestKey: uuid(72),
     })
     await db.update(ticketJobs).set({ kind: 'maintenance' }).where(eq(ticketJobs.id, jobId))
-    await expect(mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'clock_on' } }))
+    await expect(mutateSimpleWork(db, { actor, ticketId, jobId, body: startBody }))
       .resolves.toEqual({ ok: false, error: 'not_authorized' })
   })
 
-  it('uses optimistic note writes and treats an exact delayed replay as a no-op', async () => {
-    const started = await mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'clock_on' } })
-    if (!started.ok) throw new Error('start failed')
-    const saved = await mutateSimpleWork(db, {
-      actor, ticketId, jobId,
-      body: { action: 'save_note', note: '  Lift kit installed and torqued to specification.  ', expectedUpdatedAt: started.work.updatedAt },
+  it('rejects legacy note writes and malformed completion bodies before any mutation', async () => {
+    const updatedAt = (await currentWorkspace()).updatedAt
+    const invalidBodies = [
+      { action: 'start_work', expectedUpdatedAt: updatedAt, startTimer: true },
+      { action: 'clock_on', expectedUpdatedAt: updatedAt },
+      { action: 'clock_off', extra: true },
+      { action: 'save_note', note: 'Legacy write', expectedUpdatedAt: updatedAt },
+      { action: 'complete', expectedUpdatedAt: updatedAt },
+      {
+        action: 'complete',
+        expectedUpdatedAt: updatedAt,
+        completion: { kind: 'as_approved', details: 'unexpected' },
+      },
+      {
+        action: 'complete',
+        expectedUpdatedAt: updatedAt,
+        completion: { kind: 'with_details', details: '   ' },
+      },
+      {
+        action: 'complete',
+        expectedUpdatedAt: updatedAt,
+        completion: { kind: 'with_details', details: 'x'.repeat(2_001) },
+      },
+    ]
+
+    for (const body of invalidBodies) {
+      await expect(mutateSimpleWork(db, { actor, ticketId, jobId, body }))
+        .resolves.toEqual({ ok: false, error: 'invalid_input' })
+    }
+    expect(await currentWorkspace()).toMatchObject({
+      workStatus: 'open',
+      workNotes: null,
+      startedAt: null,
+      completedAt: null,
     })
-    expect(saved).toMatchObject({ ok: true, changed: true, work: { workNotes: 'Lift kit installed and torqued to specification.' } })
-    const staleDifferent = await mutateSimpleWork(db, {
-      actor, ticketId, jobId,
-      body: { action: 'save_note', note: 'Delayed old note', expectedUpdatedAt: started.work.updatedAt },
-    })
-    expect(staleDifferent).toEqual({ ok: false, error: 'conflict', retryable: true })
-    const replay = await mutateSimpleWork(db, {
-      actor, ticketId, jobId,
-      body: { action: 'save_note', note: 'Lift kit installed and torqued to specification.', expectedUpdatedAt: started.work.updatedAt },
-    })
-    expect(replay).toMatchObject({ ok: true, changed: false })
   })
 
-  it('requires only an authorized saved note and replays completion from done', async () => {
-    const started = await mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'clock_on' } })
-    if (!started.ok) throw new Error('start failed')
-    await expect(mutateSimpleWork(db, {
-      actor, ticketId, jobId, body: { action: 'complete', expectedUpdatedAt: started.work.updatedAt },
-    })).resolves.toEqual({ ok: false, error: 'not_ready' })
-    const noted = await mutateSimpleWork(db, {
-      actor, ticketId, jobId,
-      body: { action: 'save_note', note: 'Installed, torqued, and road checked.', expectedUpdatedAt: started.work.updatedAt },
+  it('completes as approved without typing, stores canonical truth, and replays the exact receipt', async () => {
+    const started = await startWork()
+    const body = {
+      action: 'complete',
+      expectedUpdatedAt: started.work.updatedAt,
+      completion: { kind: 'as_approved' },
+    }
+    const completed = await mutateSimpleWork(db, { actor, ticketId, jobId, body })
+    expect(completed).toMatchObject({
+      ok: true,
+      changed: true,
+      work: {
+        status: 'done',
+        workNotes: 'Completed as approved.',
+        clockedOnSince: null,
+      },
     })
-    if (!noted.ok) throw new Error('note failed')
+    if (!completed.ok) throw new Error('completion failed')
+
+    await db.update(quoteVersions)
+      .set({ supersededAt: new Date() })
+      .where(eq(quoteVersions.id, versionId))
+    const replay = await mutateSimpleWork(db, { actor, ticketId, jobId, body })
+    expect(replay).toEqual({
+      ok: true,
+      changed: false,
+      work: completed.work,
+    })
+  })
+
+  it('preserves an older saved internal detail when completing as approved', async () => {
+    await startWork()
+    await db.update(ticketJobs)
+      .set({ workNotes: 'Installed, torqued, and road checked.' })
+      .where(eq(ticketJobs.id, jobId))
+    const workspace = await currentWorkspace()
+
     const completed = await mutateSimpleWork(db, {
-      actor, ticketId, jobId, body: { action: 'complete', expectedUpdatedAt: noted.work.updatedAt },
+      actor,
+      ticketId,
+      jobId,
+      body: {
+        action: 'complete',
+        expectedUpdatedAt: workspace.updatedAt,
+        completion: { kind: 'as_approved' },
+      },
     })
-    expect(completed).toMatchObject({ ok: true, changed: true, work: { status: 'done' } })
-    await db.update(quoteVersions).set({ supersededAt: new Date() }).where(eq(quoteVersions.id, versionId))
-    const replay = await mutateSimpleWork(db, {
-      actor, ticketId, jobId, body: { action: 'complete', expectedUpdatedAt: noted.work.updatedAt },
+    expect(completed).toMatchObject({
+      ok: true,
+      changed: true,
+      work: {
+        status: 'done',
+        workNotes: 'Installed, torqued, and road checked.',
+      },
     })
-    expect(replay).toMatchObject({ ok: true, changed: false, work: { status: 'done' } })
+  })
+
+  it('writes normalized details and completion atomically while stale completion changes nothing', async () => {
+    await db.update(profiles)
+      .set({ jobTimerEnabled: true })
+      .where(eq(profiles.id, techId))
+    const started = await startWork()
+    await db.update(ticketJobs)
+      .set({
+        workNotes: 'Saved elsewhere.',
+        clockedOnSince: sql`clock_timestamp() - interval '30 seconds'`,
+        updatedAt: new Date(new Date(started.work.updatedAt).getTime() + 1_000),
+      })
+      .where(eq(ticketJobs.id, jobId))
+
+    const stale = await mutateSimpleWork(db, {
+      actor,
+      ticketId,
+      jobId,
+      body: {
+        action: 'complete',
+        expectedUpdatedAt: started.work.updatedAt,
+        completion: { kind: 'with_details', details: '  Installed   and verified.  ' },
+      },
+    })
+    expect(stale).toEqual({ ok: false, error: 'conflict', retryable: true })
+    const [unchanged] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+    expect(unchanged).toMatchObject({
+      workStatus: 'in_progress',
+      workNotes: 'Saved elsewhere.',
+      workCompletedAt: null,
+    })
+    expect(unchanged.clockedOnSince).not.toBeNull()
+
+    const current = await currentWorkspace()
+    const completed = await mutateSimpleWork(db, {
+      actor,
+      ticketId,
+      jobId,
+      body: {
+        action: 'complete',
+        expectedUpdatedAt: current.updatedAt,
+        completion: { kind: 'with_details', details: '  Installed   and verified.  ' },
+      },
+    })
+    expect(completed).toMatchObject({
+      ok: true,
+      changed: true,
+      work: {
+        status: 'done',
+        workNotes: 'Installed   and verified.',
+        clockedOnSince: null,
+      },
+    })
+    if (!completed.ok) throw new Error('completion failed')
+    expect(completed.work.completedAt).not.toBeNull()
+    expect(completed.work.activeSeconds).toBeGreaterThanOrEqual(29)
   })
 
   it('banks actual time across clock on, off, resume, and complete', async () => {
-    const on1 = await mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'clock_on' } })
-    if (!on1.ok) throw new Error('clock_on failed')
+    await expect(mutateSimpleWork(db, {
+      actor,
+      ticketId,
+      jobId,
+      body: { action: 'clock_on' },
+    })).resolves.toEqual({ ok: false, error: 'not_ready' })
+
+    await db.update(profiles)
+      .set({ jobTimerEnabled: true })
+      .where(eq(profiles.id, techId))
+    const on1 = await startWork()
     expect(on1.work.clockedOnSince).not.toBeNull()
     expect(on1.work.activeSeconds).toBe(0)
     expect(on1.work.startedAt).not.toBeNull()
@@ -418,6 +675,9 @@ describe('Shop OS approved simple work', () => {
     await db.update(ticketJobs)
       .set({ clockedOnSince: sql`clock_timestamp() - interval '90 seconds'` })
       .where(eq(ticketJobs.id, jobId))
+    await db.update(profiles)
+      .set({ jobTimerEnabled: false, skillTier: null })
+      .where(eq(profiles.id, techId))
     const off = await mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'clock_off' } })
     if (!off.ok) throw new Error('clock_off failed')
     expect(off.work.clockedOnSince).toBeNull()
@@ -436,19 +696,30 @@ describe('Shop OS approved simple work', () => {
     expect(offAgain).toMatchObject({ ok: true, changed: false })
 
     // Resume, pretend another 30s, then complete — the final interval banks too.
+    await expect(mutateSimpleWork(db, {
+      actor,
+      ticketId,
+      jobId,
+      body: { action: 'clock_on' },
+    })).resolves.toEqual({ ok: false, error: 'not_ready' })
+    await db.update(profiles)
+      .set({ jobTimerEnabled: true, skillTier: 2 })
+      .where(eq(profiles.id, techId))
     const on2 = await mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'clock_on' } })
     if (!on2.ok) throw new Error('resume failed')
     expect(on2.work.clockedOnSince).not.toBeNull()
     await db.update(ticketJobs)
       .set({ clockedOnSince: sql`clock_timestamp() - interval '30 seconds'` })
       .where(eq(ticketJobs.id, jobId))
-    const noted = await mutateSimpleWork(db, {
-      actor, ticketId, jobId,
-      body: { action: 'save_note', note: 'Installed and verified.', expectedUpdatedAt: on2.work.updatedAt },
-    })
-    if (!noted.ok) throw new Error('note failed')
     const done = await mutateSimpleWork(db, {
-      actor, ticketId, jobId, body: { action: 'complete', expectedUpdatedAt: noted.work.updatedAt },
+      actor,
+      ticketId,
+      jobId,
+      body: {
+        action: 'complete',
+        expectedUpdatedAt: on2.work.updatedAt,
+        completion: { kind: 'as_approved' },
+      },
     })
     if (!done.ok) throw new Error('complete failed')
     expect(done.work.status).toBe('done')
@@ -468,6 +739,7 @@ describe('Shop OS approved simple work', () => {
         title: 'Install customer-supplied lift kit',
         kind: 'repair',
         workStatus: 'open',
+        timerEnabled: false,
         authorization: 'approved',
       },
     })

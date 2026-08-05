@@ -320,7 +320,7 @@ const simpleWorkActionSchema = z.discriminatedUnion('action', [
     expectedUpdatedAt: z.string().datetime(),
     completion: z.discriminatedUnion('kind', [
       z.strictObject({ kind: z.literal('as_approved') }),
-      z.strictObject({ kind: z.literal('with_detail'), detail: z.string().trim().min(1).max(2000) }),
+      z.strictObject({ kind: z.literal('with_details'), details: z.string().trim().min(1).max(2000) }),
     ]),
   }),
 ])
@@ -328,23 +328,23 @@ const simpleWorkActionSchema = z.discriminatedUnion('action', [
 
 Add `timerEnabled: boolean` to the strict work projection. It means current effective eligibility and preference, not whether a timer is running.
 
-- [ ] **Step 1: Write RED start-work tests**
+- [x] **Step 1: Write RED start-work tests**
 
 Prove approved assigned open work starts with preference off and leaves `clockedOnSince` null; effective preference on starts work and clock in the same transaction; non-wrenching/pending/deactivated actors never get a timer from a stored true value; stale approval/assignment/updatedAt fails with zero mutation; retry after success is idempotent and never starts a timer later.
 
-- [ ] **Step 2: Write RED clock tests**
+- [x] **Step 2: Write RED clock tests**
 
 Prove `clock_on` no longer starts open work; it only resumes already-in-progress work with current effective preference; `clock_off` banks an existing interval even after the preference or tier is disabled; off/on retries are idempotent; active-seconds math and multiple-job policy remain unchanged.
 
-- [ ] **Step 3: Write RED completion tests**
+- [x] **Step 3: Write RED completion tests**
 
-Prove `as_approved` completes with no text and stores canonical detail only when no prior value exists; a legacy saved detail is preserved; `with_detail` validates and writes 1–2000 normalized characters; detail, done status, completion timestamp, and timer banking happen in one update; concurrent/stale state writes nothing; a repeated completed request returns unchanged exact receipt.
+Prove `as_approved` completes with no text and stores canonical detail only when no prior value exists; a legacy saved detail is preserved; `with_details` validates and writes 1–2000 normalized characters; detail, done status, completion timestamp, and timer banking happen in one update; concurrent/stale state writes nothing; a repeated completed request returns unchanged exact receipt.
 
-- [ ] **Step 4: Write RED parser/route tests**
+- [x] **Step 4: Write RED parser/route tests**
 
 Prove strict bodies accept the three new intents, reject legacy `save_note`, reject missing/extra/malformed completion fields, keep responses no-store, return only the bounded projection, and preserve GET/read authorization.
 
-- [ ] **Step 5: Prove RED**
+- [x] **Step 5: Prove RED**
 
 ```bash
 node node_modules/vitest/vitest.mjs run tests/unit/shop-os-simple-work.test.ts tests/unit/shop-os-simple-work-routes.test.ts tests/unit/shop-os-simple-work-ui.test.ts --maxWorkers=1
@@ -352,7 +352,7 @@ node node_modules/vitest/vitest.mjs run tests/unit/shop-os-simple-work.test.ts t
 
 Expected: `start_work`, explicit completion intent, timer preference projection, and route/parser assertions fail.
 
-- [ ] **Step 6: Implement locked actor and safe projection changes**
+- [x] **Step 6: Implement locked actor and safe projection changes**
 
 Extend the persisted locked actor selection with `skillTier` and `jobTimerEnabled`. Derive effective timer state only as:
 
@@ -363,11 +363,11 @@ const timerEnabled = actor.jobTimerEnabled === true
 
 Include it in every success read/mutation projection. Do not leak the raw preference or skill tier.
 
-- [ ] **Step 7: Implement the state machine**
+- [x] **Step 7: Implement the state machine**
 
 Keep lock order unchanged. `start_work` performs the only `open` → `in_progress` transition. `clock_on` requires `in_progress` and effective timer state. `clock_off` keys off persisted `clockedOnSince`, not current preference. Completion uses the explicit intent and one compare-and-swap update to save optional detail, bank running time, stop clock, mark done, and stamp completion.
 
-- [ ] **Step 8: Prove GREEN and commit**
+- [x] **Step 8: Prove GREEN and commit**
 
 ```bash
 node node_modules/vitest/vitest.mjs run tests/unit/shop-os-simple-work.test.ts tests/unit/shop-os-simple-work-routes.test.ts tests/unit/shop-os-simple-work-ui.test.ts --maxWorkers=1
@@ -437,7 +437,7 @@ start_work -> workStatus === 'in_progress'
 clock_on   -> clockedOnSince !== null
 clock_off  -> clockedOnSince === null
 complete   -> workStatus === 'done'
-with_detail completion -> done && workNotes === submitted normalized detail
+with_details completion -> done && workNotes === submitted normalized detail
 ```
 
 If exact truth cannot be proven, show `Couldn't confirm what happened` and retain every draft. Show `Your detail` and `Saved elsewhere` with deliberate `Use my detail` / `Use saved detail` choices when the baseline changed.

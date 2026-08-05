@@ -23,6 +23,7 @@ const workspace = z.strictObject({
   clockedOnSince: timestamp.nullable(),
   activeSeconds: z.number().int().min(0),
   updatedAt: timestamp,
+  timerEnabled: z.boolean(),
   authorization: z.enum(['approved', 'declined', 'awaiting_approval']),
   approvedScope: approvedScope.optional(),
 }).superRefine((value, context) => {
@@ -38,6 +39,7 @@ const work = z.strictObject({
   clockedOnSince: timestamp.nullable(),
   activeSeconds: z.number().int().min(0),
   updatedAt: timestamp,
+  timerEnabled: z.boolean(),
 })
 const escalationJob = z.strictObject({
   id: uuid,

@@ -24,7 +24,8 @@ const ticket = { id: TICKET, number: 7, customerName: 'Morgan Lee', vehicle: '20
 const base: SimpleWorkWorkspaceView = {
   id: JOB, title: 'Install lift kit', kind: 'repair', workStatus: 'open', workNotes: null,
   startedAt: null, completedAt: null, clockedOnSince: null, activeSeconds: 0,
-  updatedAt: '2026-07-11T12:00:00.000Z', authorization: 'approved',
+  updatedAt: '2026-07-11T12:00:00.000Z', timerEnabled: false,
+  authorization: 'approved',
   approvedScope: {
     authorizationPurpose: null, customerSuppliedPartsNote: 'Customer supplied unopened lift kit.',
     lines: [{ kind: 'labor', description: 'Install lift kit', hours: '2' }],
