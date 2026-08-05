@@ -1412,7 +1412,11 @@ function isCustomerCopySuccess(
     || !Array.isArray(copy.decisions) || !copy.decisions.every(isCustomerCopyDecision)
     || !isCustomerCopyTotals(copy.totals)
     || !(copy.closedAt === null || isExactIsoTimestamp(copy.closedAt))) return false
-  return !copy.blockers.includes('pricing_unavailable') || copy.jobs.length === 0
+  const validatedCopy = copy as CustomerCopyProjection
+  const lineSubtotalCents = sumCustomerCopyLineCents(validatedCopy.jobs)
+  if (!validatedCopy.blockers.includes('pricing_unavailable')
+    && lineSubtotalCents !== validatedCopy.totals.subtotalCents) return false
+  return !validatedCopy.blockers.includes('pricing_unavailable') || validatedCopy.jobs.length === 0
 }
 
 function isCustomerCopyShop(value: unknown): boolean {
@@ -1467,6 +1471,17 @@ function isCustomerCopyLine(value: unknown): boolean {
     && (value.laborRateCents === null || isSafeCents(value.laborRateCents))
   return value.kind === 'fee'
     && hasExactKeys(value, ['kind', 'description', 'priceCents', 'taxable'])
+}
+
+function sumCustomerCopyLineCents(jobs: CustomerCopyProjection['jobs']): number | null {
+  let subtotalCents = 0
+  for (const job of jobs) {
+    for (const line of job.lines) {
+      subtotalCents += line.priceCents
+      if (!Number.isSafeInteger(subtotalCents)) return null
+    }
+  }
+  return subtotalCents
 }
 
 function isCustomerCopyDecision(value: unknown): boolean {

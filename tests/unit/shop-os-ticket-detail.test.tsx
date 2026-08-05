@@ -44,6 +44,16 @@ const malformedCustomerCopies: Array<[string, unknown]> = [
     ...customerCopyFixture,
     totals: { ...customerCopyFixture.totals, paidCents: 4_000, balanceCents: 25_550 },
   }],
+  ['line/subtotal mismatch', {
+    ...customerCopyFixture,
+    jobs: [{
+      ...customerCopyFixture.jobs[0],
+      lines: [
+        { ...customerCopyFixture.jobs[0].lines[0], priceCents: 9_999 },
+        customerCopyFixture.jobs[0].lines[1],
+      ],
+    }],
+  }],
   ['contradictory print readiness', {
     ...customerCopyFixture,
     readyToPrint: true,
