@@ -57,8 +57,9 @@ export async function checkpoint(
   // and read as a layout defect that does not exist. The viewport is also the
   // honest answer to "what does this look like at this width."
   const evidence = process.env.GOLDEN_QA_RETAIN_EVIDENCE === '1'
-    ? await page.screenshot()
+    ? testInfo.outputPath(`${label}.png`)
     : null
+  if (evidence) await page.screenshot({ path: evidence })
 
   const accessibility = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
@@ -83,7 +84,7 @@ export async function checkpoint(
   // needs to review the same checkpoint by eye, retained evidence also keeps
   // the rendered page at the exact project viewport.
   if (evidence) {
-    await testInfo.attach(`${label}.png`, { body: evidence, contentType: 'image/png' })
+    await testInfo.attach(`${label}.png`, { path: evidence, contentType: 'image/png' })
   }
   expect(blocking, `${label} has serious or critical accessibility violations`).toEqual([])
 }

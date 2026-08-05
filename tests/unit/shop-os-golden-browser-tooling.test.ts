@@ -34,18 +34,28 @@ describe('Golden browser QA control', () => {
       join(process.cwd(), 'tests/e2e/technician-handoff-proof.spec.ts'),
       'utf8',
     )
+    const receipts = readFileSync(
+      join(process.cwd(), 'tests/e2e/golden-browser-receipts.ts'),
+      'utf8',
+    )
+    const runner = readFileSync(
+      join(process.cwd(), 'scripts/shop-os-golden-browser.mjs'),
+      'utf8',
+    )
 
     expect(config).toMatch(/390[\s\S]*844/)
     expect(config).toMatch(/1440[\s\S]*900/)
     expect(main).toContain("@/components/screens/today-jobs-board")
     expect(main).toContain("@/app/globals.css")
-    expect(proof).toMatch(/approved unassigned[\s\S]*approved preassigned[\s\S]*state matrix[\s\S]*recovery/i)
+    expect(proof).toMatch(/timer-off technician[\s\S]*optional detail[\s\S]*personal timer[\s\S]*detail survives reload[\s\S]*ambiguous Start work[\s\S]*state matrix[\s\S]*recovery/i)
     expect(proof).toMatch(/Exactly what is approved/)
     expect(proof).toMatch(/44/)
     expect(proof).toMatch(/scrollWidth/)
     expect(proof).toMatch(/Axe|checkpoint/)
     expect(proof).toMatch(/price|money/i)
     expect(proof).toMatch(/active inline tool|Work on this job/i)
+    expect(receipts).toMatch(/testInfo\.outputPath/)
+    expect(runner).toMatch(/selectedProject\s*\?\s*\['--project', selectedProject\]\s*:\s*\[\]/)
   })
 
   it('passes only the minimal runtime allowlist to the proof spawn', () => {
@@ -55,6 +65,7 @@ describe('Golden browser QA control', () => {
       TMPDIR: '/safe/tmp',
       CI: '1',
       PLAYWRIGHT_USE_SYSTEM_CHROME: '1',
+      GOLDEN_QA_RETAIN_EVIDENCE: '1',
       DATABASE_URL: 'must-not-escape',
       SUPABASE_SERVICE_ROLE_KEY: 'must-not-escape',
       BUZZ_RELAY_URL: 'must-not-escape',
@@ -76,6 +87,7 @@ describe('Golden browser QA control', () => {
       TMPDIR: '/safe/tmp',
       CI: '1',
       PLAYWRIGHT_USE_SYSTEM_CHROME: '1',
+      GOLDEN_QA_RETAIN_EVIDENCE: '1',
       TECHNICIAN_HANDOFF_BASE_URL: CANONICAL_TECHNICIAN_HANDOFF_BASE_URL,
     })
     expect(assertTechnicianHandoffHarnessSafety(environment)).toEqual({
