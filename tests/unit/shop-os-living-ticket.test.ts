@@ -83,11 +83,11 @@ describe('living repair order next-move projection', () => {
   it('opens approved assigned simple work, including manual diagnostics only while diagnostics are unavailable', () => {
     expect(project({
       jobs: [job({ assignedTechId: PROFILE, approvalState: 'approved' })],
-    }).primary).toMatchObject({ kind: 'work', label: 'Review & clock on' })
+    }).primary).toMatchObject({ kind: 'work', label: 'Review & start work' })
 
     expect(project({
       jobs: [job({ kind: 'diagnostic', assignedTechId: PROFILE, approvalState: 'approved' })],
-    }).primary).toMatchObject({ kind: 'work', label: 'Review & clock on' })
+    }).primary).toMatchObject({ kind: 'work', label: 'Review & start work' })
 
     expect(project({
       diagnosticsEntitled: true,
@@ -273,7 +273,7 @@ describe('technician job readiness projection', () => {
   })
 
   it('separates approved review, running, paused, and blocked truth', () => {
-    expect(readiness()).toEqual({ state: 'review', label: 'Review & clock on' })
+    expect(readiness()).toEqual({ state: 'review', label: 'Review & start work' })
     expect(readiness({
       workStatus: 'in_progress',
       clockedOnSince: '2026-08-04T20:00:00.000Z',
@@ -283,7 +283,7 @@ describe('technician job readiness projection', () => {
       clockedOnSince: '2026-08-04T20:00:00.000Z',
     })
     expect(readiness({ workStatus: 'in_progress' }))
-      .toEqual({ state: 'paused', label: 'Clock paused' })
+      .toEqual({ state: 'paused', label: 'Work in progress' })
     expect(readiness({ workStatus: 'blocked' }))
       .toEqual({ state: 'unavailable', label: 'Review repair order' })
     expect(readiness({ workStatus: 'blocked', approvalState: 'pending_quote' }))

@@ -303,7 +303,7 @@ describe('TodayJobsBoard persisted ledger', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Review & clock on' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review & start work' }))
 
     expect(screen.getByLabelText('Work on this job')).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('Opening assigned work…')
@@ -416,7 +416,7 @@ describe('TodayJobsBoard persisted ledger', () => {
       currentProfileId="profile-1"
     />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Review & clock on' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review & start work' }))
     await screen.findByRole('heading', { name: 'Exactly what is approved' })
     fireEvent.click(screen.getByRole('button', { name: 'Start work' }))
 
@@ -603,7 +603,7 @@ describe('TodayJobsBoard persisted ledger', () => {
       '/api/tickets/ticket-44/jobs/job-maintenance/interruption',
       expect.objectContaining({ method: 'POST' }),
     )
-    expect(screen.getByRole('button', { name: 'Review & clock on' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Review & start work' })).toBeEnabled()
   })
 
   it('shows technician waiting truth without exposing price-building', () => {
@@ -619,7 +619,7 @@ describe('TodayJobsBoard persisted ledger', () => {
 
     expect(screen.getByText('Waiting for quote')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Build quote' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Review & clock on' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Review & start work' })).toBeNull()
   })
 
   it('keeps blocked technician work in repair-order recovery without exposing price-building', () => {
@@ -674,7 +674,7 @@ describe('TodayJobsBoard persisted ledger', () => {
     ]} openJobs={[]} role="tech" currentProfileId="profile-1" />)
 
     expect(screen.getByText('Running work').closest('article')).toHaveTextContent('Clock running since')
-    expect(screen.getByText('Paused work').closest('article')).toHaveTextContent('Clock paused')
+    expect(screen.getByText('Paused work').closest('article')).toHaveTextContent('Work in progress')
     expect(screen.queryByText(/seconds|payroll/i)).toBeNull()
   })
 

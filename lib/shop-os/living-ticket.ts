@@ -27,9 +27,9 @@ export type TechnicianJobReadiness =
   | { state: 'waiting_advisor'; label: 'Waiting for advisor' }
   | { state: 'waiting_customer'; label: 'Waiting for customer' }
   | { state: 'declined'; label: 'Customer declined' }
-  | { state: 'review'; label: 'Review & clock on' }
+  | { state: 'review'; label: 'Review & start work' }
   | { state: 'running'; label: 'Clock running since'; clockedOnSince: string }
-  | { state: 'paused'; label: 'Clock paused' }
+  | { state: 'paused'; label: 'Work in progress' }
   | { state: 'continue'; label: 'Continue work' }
   | { state: 'unavailable'; label: 'Review repair order' }
 
@@ -84,7 +84,7 @@ export function projectTechnicianJobReadiness(
     return { state: 'waiting_customer', label: 'Waiting for customer' }
   }
   if (input.workStatus === 'open') {
-    return { state: 'review', label: 'Review & clock on' }
+    return { state: 'review', label: 'Review & start work' }
   }
   if (input.workStatus === 'in_progress' && input.clockedOnSince) {
     return {
@@ -94,7 +94,7 @@ export function projectTechnicianJobReadiness(
     }
   }
   if (input.workStatus === 'in_progress') {
-    return { state: 'paused', label: 'Clock paused' }
+    return { state: 'paused', label: 'Work in progress' }
   }
   return { state: 'unavailable', label: 'Review repair order' }
 }
@@ -224,7 +224,7 @@ export function projectLivingTicketCommands(input: Input): LivingTicketCommands 
           ? 'Continue work'
           : readiness.state === 'review'
             ? readiness.label
-            : 'Review & clock on',
+            : 'Review & start work',
         rank: job.workStatus === 'in_progress' ? 0 : 20,
       })
     }
