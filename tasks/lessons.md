@@ -291,3 +291,7 @@ Reason: Repeating known work makes completion painful without adding trustworthy
 Trigger: A founder asks what “notes” means after the product decision already made free text optional.
 Rule: Hide legacy storage names; say Complete as approved and Add detail everywhere the technician sees.
 Reason: Internal field vocabulary makes an optional escape hatch feel like mandatory paperwork.
+### exact-hash-before-report
+Trigger: Reporting a commit hash to humans.
+Rule: Run `git rev-parse HEAD` immediately before publishing; copy the returned value verbatim.
+Reason: Guessed full hashes create false evidence even when the short prefix is right.

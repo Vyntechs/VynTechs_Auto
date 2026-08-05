@@ -486,11 +486,11 @@ Expected: workspace, draft, TypeScript, and diff checks pass.
 - Modify: `components/screens/today-jobs-board.tsx`
 - Modify: `tests/unit/shop-os-today-jobs-board.test.tsx`
 
-- [ ] **Step 1: Write RED mounted-settlement tests**
+- [x] **Step 1: Write RED mounted-settlement tests**
 
 Prove a server-confirmed done projection immediately changes the row to `Complete`, removes mutation commands, retains the completed Work receipt mounted, announces completion once, and does not require a route/page refresh. Closing the receipt then removes the job from local My Work, focuses the board, and refreshes server truth. Repeated done projections and close taps are idempotent.
 
-- [ ] **Step 2: Prove RED**
+- [x] **Step 2: Prove RED**
 
 ```bash
 node node_modules/vitest/vitest.mjs run tests/unit/shop-os-today-jobs-board.test.tsx --maxWorkers=1
@@ -498,11 +498,11 @@ node node_modules/vitest/vitest.mjs run tests/unit/shop-os-today-jobs-board.test
 
 Expected: Today currently leaves the row active until workspace close and refresh.
 
-- [ ] **Step 3: Implement a bounded completion override**
+- [x] **Step 3: Implement a bounded completion override**
 
 Maintain a local `Set<string>` of server-confirmed completed job IDs. `applyWorkProjection` adds a done job without closing its workspace. Pass completion truth into row/section projection so the row settles in place. When the user closes a completed receipt, remove that job from each bounded local Today group and completion set, close/focus, then refresh. Do not widen the persisted active Today status type.
 
-- [ ] **Step 4: Prove GREEN and commit**
+- [x] **Step 4: Prove GREEN and commit**
 
 ```bash
 node node_modules/vitest/vitest.mjs run tests/unit/shop-os-today-jobs-board.test.tsx tests/unit/shop-os-simple-work-workspace.test.tsx --maxWorkers=1
