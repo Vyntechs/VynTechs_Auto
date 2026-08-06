@@ -684,7 +684,7 @@ git log -1 --format=full
 
 Stop if `git config user.email` is empty. Do not hardcode identity values from this plan.
 
-- [ ] **Step 7: Push and open the PR; stop before merge**
+- [x] **Step 7: Push and open the PR; stop before merge**
 
 Push the exact reviewed branch, open one PR with Buzz channel `95938fc9-02c1-4c1a-8b20-84f540bc6c74`, and report the returned PR link. Wait for hosted checks. Do not merge, deploy, apply migrations, activate flags, use supplier credentials, or mutate production data.
 
