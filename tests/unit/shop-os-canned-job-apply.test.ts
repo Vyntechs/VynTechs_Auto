@@ -231,6 +231,7 @@ describe('Shop OS existing-ticket canned job application', () => {
   })
 
   it('supersedes one active version once, resets included approval, and produces complete builder/snapshot totals', async () => {
+    const prepareActor = { profileId: uuid(1) }
     await db.insert(ticketJobs).values({
       id: uuid(30), shopId, ticketId, title: 'Inspection', kind: 'repair', requiredSkillTier: 1,
     })
@@ -238,12 +239,12 @@ describe('Shop OS existing-ticket canned job application', () => {
       id: uuid(31), shopId, jobId: uuid(30), kind: 'fee', description: 'Inspection',
       priceCents: 1_000, taxable: false, source: 'manual',
     })
-    const initialBuilder = await getQuoteBuilder(db, { actor, ticketId })
+    const initialBuilder = await getQuoteBuilder(db, { actor: prepareActor, ticketId })
     if (!initialBuilder.ok || !initialBuilder.builder.draftCommitment) {
       throw new Error('initial quote commitment fixture failed')
     }
     const version = await createQuoteVersion(db, {
-      actor, ticketId,
+      actor: prepareActor, ticketId,
       expectedDraftFingerprint: initialBuilder.builder.draftCommitment.fingerprint,
     })
     if (!version.ok) throw new Error('version fixture failed')
@@ -255,7 +256,7 @@ describe('Shop OS existing-ticket canned job application', () => {
     expect(oldVersion.supersededAt).not.toBeNull()
     const [oldJob] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, uuid(30)))
     expect(oldJob).toMatchObject({ approvalState: 'pending_quote', approvedQuoteVersionId: null })
-    const builder = await getQuoteBuilder(db, { actor, ticketId })
+    const builder = await getQuoteBuilder(db, { actor: prepareActor, ticketId })
     expect(builder).toMatchObject({ ok: true, builder: { jobs: [{ id: uuid(30) }, { id: applied.ok ? applied.job.id : '' }] } })
     if (!builder.ok) throw new Error('builder failed')
     const totals = builder.builder.jobs.flatMap((job) => job.lines)
@@ -263,7 +264,7 @@ describe('Shop OS existing-ticket canned job application', () => {
     expect(totals).toBe(32_750)
     if (!builder.builder.draftCommitment) throw new Error('next quote commitment fixture failed')
     const next = await createQuoteVersion(db, {
-      actor, ticketId,
+      actor: prepareActor, ticketId,
       expectedDraftFingerprint: builder.builder.draftCommitment.fingerprint,
     })
     if (!next.ok) throw new Error('next version failed')

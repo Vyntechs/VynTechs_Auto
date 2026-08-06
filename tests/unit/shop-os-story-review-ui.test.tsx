@@ -187,6 +187,7 @@ describe('Shop OS diagnostic story UI', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(<ManualQuoteBuilder ticket={ticket} builder={builder('manual_findings')} />)
 
+    fireEvent.click(screen.getByText('Add work'))
     const form = screen.getByRole('region', { name: 'Add repair' })
     expect(within(form).getByRole('button', { name: 'Add repair' })).toBeDisabled()
     fireEvent.change(within(form).getByLabelText('What are we doing'), { target: { value: 'Replace alternator' } })

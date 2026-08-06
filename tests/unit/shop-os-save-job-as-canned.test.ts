@@ -69,7 +69,7 @@ describe('Shop OS save a worked job as a canned job', () => {
   // Pins the job to the version the customer approved, the way a counter
   // approval does, so every test below reads the authorized money.
   const approve = async () => {
-    const quoteActor = { profileId: uuid(2) }
+    const quoteActor = { profileId: uuid(1) }
     const builder = await getQuoteBuilder(db, { actor: quoteActor, ticketId })
     if (!builder.ok || !builder.builder.draftCommitment) throw new Error('quote commitment fixture failed')
     const version = await createQuoteVersion(db, {

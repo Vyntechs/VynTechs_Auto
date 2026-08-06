@@ -50,6 +50,7 @@ async function seedDiagnosticTicket(db: TestDb) {
     title: 'Diagnose no-start',
     kind: 'diagnostic',
     requiredSkillTier: 2,
+    assignedTechId: profile.id,
   }).returning()
   return { shop, profile, ticket, job }
 }
