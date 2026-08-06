@@ -8,9 +8,11 @@ created: 2026-08-05
 
 Evidence class: **hermetic real-component proof**.
 
-Production source under proof: branch `codex/living-repair-order-visual-2026-08-05`
-at SHA `4f44c5a828500148367f81d080f0c265d4084e03`, plus the Task 5 proof files
-listed below before their proof-only commit.
+Release candidate under proof: branch `codex/living-repair-order-visual-2026-08-05`
+at exact tested SHA `34fc6a1f20096a041d4e540cebdbc5774eddac01`.
+Product source last changed at `b3bd6c406e774e72ef6cd8521d7fa493a73ad352`;
+`34fc6a1` is the test-only compatibility closure discovered by the complete
+repository run.
 
 This receipt preserves the separate pre-code direction receipt at
 `docs/proofs/2026-08-05-living-repair-order-visual-proof.md`. It does not
@@ -60,13 +62,17 @@ components.
 Run on 2026-08-05:
 
 ```bash
+corepack pnpm test:shards
 corepack pnpm exec tsc --noEmit --pretty false
+corepack pnpm build
 corepack pnpm exec playwright test --config=playwright.living-repair-order.config.ts
 git diff --check
 ```
 
+- Full repository: **4,390 passed across 8 sequential shards**, exit 0.
 - TypeScript: exit 0.
-- Playwright: **22 passed, 2 intentional viewport skips**, exit 0, 29.8s.
+- Production build: **71/71 pages**, exit 0; route count unchanged.
+- Playwright: **22 passed, 2 intentional viewport skips**, exit 0, 36.3s.
   The phone project skips the desktop-only print receipt; the desktop project
   skips the phone-only reduced-motion design-provenance receipt.
 - `git diff --check`: exit 0.
@@ -104,5 +110,9 @@ activation, production data mutation, merge, or deployment occurred.
   it before the proof could continue.
 - Failed then repaired: the harness initially omitted shipped app-header CSS,
   making two mounted header controls appear below the 44px target contract.
-- Remaining: authenticated hosted proof and the full repository gate belong
-  to Task 6 and the later release authority gate.
+- Failed then repaired: the first full run passed 4,348 tests and exposed 42
+  legacy fixture/disclosure failures. The test-only compatibility commit
+  `34fc6a1` aligned those fixtures with the approved assigned-tech and
+  whole-ticket Prepare boundaries; the exact rerun passed all 4,390 tests.
+- Remaining: authenticated hosted proof belongs to the PR checks and a later
+  release authority gate.

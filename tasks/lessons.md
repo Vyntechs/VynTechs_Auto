@@ -305,3 +305,23 @@ Reason: Three legacy fixtures and one golden flow escaped focused tests and caus
 Trigger: A design promises a durable activity or receipt beside a state change.
 Rule: Test both receipt creation and replay deduplication before implementation can pass.
 Reason: The state can succeed while required audit history is silently absent.
+
+### founder-gates-fit-in-three-lines
+Trigger: A decision request leaves the founder unsure what to say because explanatory detail followed the gate.
+Rule: Put only the decision and effect in Buzz; link the artifact and keep rationale out of the action message.
+Reason: A correct recommendation still fails when reading effort obscures the requested response.
+
+### buzz-ios-images-require-file-attachments
+Trigger: A founder cannot see proof images from raw Blossom URLs in the Buzz iOS app.
+Rule: Send visual proof with `buzz messages send --file`; do not rely on pasted media URLs.
+Reason: File attachments add image metadata and inline markdown that the mobile client can render.
+
+### visual-proofs-must-show-causal-input
+Trigger: A visual proof jumps from missing data to a completed value without showing who supplied the input.
+Rule: Render every user-visible causal step and role handoff; never use a magic state transition to demonstrate flow.
+Reason: A polished transition can hide the exact workflow friction the proof is supposed to resolve.
+
+### ticket-building-is-shared-work
+Trigger: A workflow assumes technicians only supply scope while advisors own pricing.
+Rule: Model ticket construction as shared technician/advisor work; never force a serial role handoff without product evidence.
+Reason: Real shops shift roles, and owner-technicians often build the complete ticket themselves.
