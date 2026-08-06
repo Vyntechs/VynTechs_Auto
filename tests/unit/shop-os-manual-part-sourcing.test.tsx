@@ -917,6 +917,23 @@ describe('ManualPartSourcing', () => {
     expect(document.body).not.toHaveTextContent(/Autosaved|\bOrder\b|\bBuy\b|Live price|Verified fitment|\d+\s+of\s+\d+|\d+\s+steps?/i)
   })
 
+  it('labels planned supplier connections as passive text without provider requests or fake affordances', () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    render(<ManualPartSourcing {...props()} />)
+
+    const planned = screen.getByRole('complementary', { name: 'Planned supplier connections, not live' })
+    expect(within(planned).getByText('Planned connections · not live')).toBeInTheDocument()
+    for (const provider of ["O'Reilly First Call", 'PartsTech', 'RepairLink']) {
+      const label = within(planned).getByText(provider)
+      expect(label.tagName).toBe('LI')
+      expect(within(planned).queryByRole('button', { name: provider })).toBeNull()
+      expect(within(planned).queryByRole('link', { name: provider })).toBeNull()
+      expect(within(planned).queryByRole('tab', { name: provider })).toBeNull()
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('encodes the single-state responsive panel, safe area, sticky action, touch target, and reduced-motion contract', () => {
     const css = readFileSync(resolve(process.cwd(), 'components/screens/manual-part-sourcing.module.css'), 'utf8')
     expect(css).toMatch(/@media\s*\(min-width:\s*801px\)/)

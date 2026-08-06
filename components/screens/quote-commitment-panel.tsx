@@ -49,6 +49,8 @@ export function QuoteCommitmentPanel({
   const activeVersion = builder.activeVersion
   const lastPrepared = builder.lastPreparedVersion
   const revised = activeVersion === null && lastPrepared?.state === 'superseded'
+  const canPrepare = builder.capabilities.canPrepareQuote
+  const hasSavedLines = builder.jobs.some((job) => job.lines.length > 0)
 
   useEffect(() => {
     if (confirmation) commitmentHeadingRef.current?.focus()
@@ -95,6 +97,10 @@ export function QuoteCommitmentPanel({
         </>
       ) : (
         <>
+          {!hasSavedLines ? (
+            <p className={styles.noPrice}>No price yet</p>
+          ) : (
+          <>
           {!totals.ok ? (
             <div className={styles.blocked}>
               <strong>Totals unavailable</strong>
@@ -142,7 +148,7 @@ export function QuoteCommitmentPanel({
               : 'Customer has not received this'}
           </p>
 
-          {confirmation ? (
+          {canPrepare && confirmation ? (
             <div
               className={styles.commitmentPlate}
               role="dialog"
@@ -171,11 +177,11 @@ export function QuoteCommitmentPanel({
                 </button>
               </div>
             </div>
-          ) : preparation.kind === 'blocked' ? (
+          ) : canPrepare && preparation.kind === 'blocked' ? (
             <div className={styles.prepareState}>
               <ul>{preparation.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
             </div>
-          ) : preparation.kind === 'ready' ? (
+          ) : canPrepare && preparation.kind === 'ready' ? (
             <div className={styles.prepareState}>
               <button
                 type="button"
@@ -188,6 +194,8 @@ export function QuoteCommitmentPanel({
               </button>
             </div>
           ) : null}
+          </>
+          )}
         </>
       )}
     </aside>

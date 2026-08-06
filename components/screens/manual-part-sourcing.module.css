@@ -169,6 +169,39 @@
   line-height: 1.45;
 }
 
+.plannedConnections {
+  min-width: 0;
+  margin: 0 0 22px;
+  border-left: 2px solid var(--vt-rule-strong);
+  padding-left: 14px;
+  color: var(--vt-fg-3);
+}
+
+.plannedConnections p {
+  margin: 0;
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.plannedConnections ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 16px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.plannedConnections li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .secondary,
 .seed button {
   border: 1px solid var(--vt-signal-600);

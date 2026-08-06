@@ -106,6 +106,7 @@ export function ManualQuoteBuilder({
   vendorCatalogAvailable = false,
   canCreateVendorAccount = false,
   embedded = false,
+  focusJobId = null,
   onClose,
   onProjection,
   onReloadCatalog,
@@ -119,6 +120,7 @@ export function ManualQuoteBuilder({
   vendorCatalogAvailable?: boolean
   canCreateVendorAccount?: boolean
   embedded?: boolean
+  focusJobId?: string | null
   onClose?: () => void
   onProjection?: (jobs: Array<{
     id: string
@@ -149,6 +151,7 @@ export function ManualQuoteBuilder({
   const [confirmedTarget, setConfirmedTarget] = useState<string | null>(null)
   const [selectedCannedId, setSelectedCannedId] = useState<string | null>(null)
   const [cannedClientKey, setCannedClientKey] = useState<string | null>(null)
+  const [addWorkOpen, setAddWorkOpen] = useState(false)
   const [decision, setDecision] = useState<DecisionState | null>(null)
   const [accounts, setAccounts] = useState(vendorAccounts)
   const [sourcingJobId, setSourcingJobId] = useState<string | null>(null)
@@ -158,6 +161,7 @@ export function ManualQuoteBuilder({
   } | null>(null)
   const [decisionVerdicts, setDecisionVerdicts] = useState<Record<string, string>>({})
   const focusRefs = useRef(new Map<string, HTMLElement>())
+  const mountedFocusJobRef = useRef<string | null>(null)
   const inFlightRef = useRef(false)
   const approvalRefreshInFlightRef = useRef(false)
   const approvalRefreshQueuedRef = useRef(false)
@@ -190,6 +194,13 @@ export function ManualQuoteBuilder({
   useEffect(() => setCurrent(builder), [builder])
   useEffect(() => { currentRef.current = current }, [current])
   useEffect(() => {
+    if (!embedded || !focusJobId
+      || mountedFocusJobRef.current === focusJobId
+      || !current.jobs.some((job) => job.id === focusJobId)) return
+    mountedFocusJobRef.current = focusJobId
+    setFocusTarget(`job:${focusJobId}`)
+  }, [current.jobs, embedded, focusJobId])
+  useEffect(() => {
     approvalLinkRef.current = null
     setApprovalLinkStatus('')
     setApprovalLinkCopied(false)
@@ -214,7 +225,7 @@ export function ManualQuoteBuilder({
     const line = draft.lineId
       ? job?.lines.find((candidate) => candidate.id === draft.lineId)
       : undefined
-    if (!job || (draft.mode === 'edit' && (
+    if (!job || !job.canEdit || (draft.mode === 'edit' && (
       !line || !line.mutable || line.kind !== draft.kind
     ))) {
       sessionStorage.removeItem(key)
@@ -259,6 +270,16 @@ export function ManualQuoteBuilder({
       setStatusMessage('Draft remains open, but reload protection is unavailable')
     }
   }, [actorId, editor, ticket.id])
+  useEffect(() => {
+    if (!actorId || !editor
+      || current.jobs.some((job) => job.id === editor.jobId && job.canEdit)) return
+    setEditor(null)
+    try {
+      sessionStorage.removeItem(quoteEditorDraftKey(actorId, ticket.id))
+    } catch {
+      // The unauthorized editor is already closed; unavailable storage needs no recovery.
+    }
+  }, [actorId, current.jobs, editor, ticket.id])
   useEffect(() => {
     if (!editor?.dirty) return
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -406,7 +427,7 @@ export function ManualQuoteBuilder({
 
   const lines = current.jobs.flatMap((job) => job.lines)
   const sourcingJob = sourcingJobId
-    ? current.jobs.find((job) => job.id === sourcingJobId) ?? null
+    ? current.jobs.find((job) => job.id === sourcingJobId && job.canEdit) ?? null
     : null
   const diagnosisSeed = selectLockedDiagnosisSeed(current.jobs)
   // A saved diagnostic is priced through Add diagnostic time, which writes it as
@@ -465,6 +486,7 @@ export function ManualQuoteBuilder({
 
   function requestEditor(target: EditorTarget, invoker: HTMLElement): void {
     if (inFlightRef.current || modal || sourcingJobId || prepareConfirmation) return
+    if (!current.jobs.some((job) => job.id === target.jobId && job.canEdit)) return
     if (editor?.dirty) {
       setModal({ kind: 'discard', target, invoker })
       return
@@ -764,6 +786,7 @@ export function ManualQuoteBuilder({
   async function submitEditor(event: React.FormEvent): Promise<void> {
     event.preventDefault()
     if (!editor || inFlightRef.current || conflictRecovery !== null) return
+    if (!current.jobs.some((job) => job.id === editor.jobId && job.canEdit)) return
     let line: Record<string, unknown>
     try {
       const laborRate = editor.mode === 'edit' && editor.line?.kind === 'labor'
@@ -850,6 +873,10 @@ export function ManualQuoteBuilder({
   async function confirmRemove(): Promise<void> {
     if (modal?.kind !== 'remove' || conflictRecovery !== null || !beginOperation('remove')) return
     const removeTarget = modal.target
+    if (!current.jobs.some((job) => job.id === removeTarget.jobId && job.canEdit)) {
+      endOperation()
+      return
+    }
     setError(null)
     try {
       const response = await fetch(
@@ -903,6 +930,10 @@ export function ManualQuoteBuilder({
   async function confirmSourcedRemove(): Promise<void> {
     if (modal?.kind !== 'remove-sourced' || !beginOperation('remove')) return
     const removeTarget = modal.target
+    if (!current.jobs.some((job) => job.id === removeTarget.jobId && job.canEdit)) {
+      endOperation()
+      return
+    }
     setError(null)
     try {
       const response = await fetch(
@@ -951,7 +982,7 @@ export function ManualQuoteBuilder({
   }
 
   function openPrepare(): void {
-    if (preparation.kind !== 'ready' || !current.draftCommitment
+    if (!current.capabilities.canPrepareQuote || preparation.kind !== 'ready' || !current.draftCommitment
       || inFlightRef.current || conflictRecovery !== null) return
     setError(null)
     setPrepareConfirmation({
@@ -966,7 +997,8 @@ export function ManualQuoteBuilder({
   }
 
   async function prepareQuote(): Promise<void> {
-    if (!prepareConfirmation || editor !== null || sourcingJob !== null || modal !== null
+    if (!current.capabilities.canPrepareQuote || !prepareConfirmation
+      || editor !== null || sourcingJob !== null || modal !== null
       || conflictRecovery !== null || !beginOperation('prepare')) return
     const pending = prepareConfirmation
     setError(null)
@@ -1342,7 +1374,7 @@ export function ManualQuoteBuilder({
           <p className={styles.eyebrow}>
             Repair order {String(ticket.ticketNumber).padStart(6, '0')}
           </p>
-          {embedded ? <h2>Build quote</h2> : <h1>Build quote</h1>}
+          {embedded ? <h2>Build ticket</h2> : <h1>Build quote</h1>}
           {ticket.customer && ticket.vehicle && (
             <p className={styles.identity}>
               <span>{ticket.customer.name}</span>
@@ -1401,80 +1433,6 @@ export function ManualQuoteBuilder({
             <p>{current.jobs.length} {current.jobs.length === 1 ? 'job' : 'jobs'}</p>
           </div>
 
-          {!cannedCatalogAvailable ? (
-            <div className={styles.cannedUnavailable} tabIndex={-1} ref={cannedUnavailableRef}>
-              <strong>Canned jobs unavailable</strong>
-              <p>You can still type the work in by hand. Refresh before using the library.</p>
-              <button type="button" className={styles.lineAction} onClick={reloadCannedPage}>
-                Refresh canned jobs
-              </button>
-            </div>
-          ) : quoteCannedJobs.length === 0 ? (
-            <p className={styles.cannedEmpty}>Nothing saved in the library yet. You can still type the work in by hand.</p>
-          ) : (
-            <section className={styles.cannedPicker} aria-labelledby="canned-job-heading">
-              <div>
-                <p className={styles.eyebrow}>Saved work</p>
-                <h3 id="canned-job-heading">Add canned job</h3>
-              </div>
-              <label htmlFor="quote-canned-job">Canned job</label>
-              <select
-                id="quote-canned-job"
-                ref={cannedSelectRef}
-                value={selectedCannedId ?? ''}
-                disabled={busy}
-                onChange={(event) => {
-                  setSelectedCannedId(event.target.value || null)
-                  setCannedClientKey(crypto.randomUUID())
-                  selectedFingerprintRef.current = quoteCannedJobs.find((job) => job.id === event.target.value)?.fingerprint ?? null
-                  setError(null)
-                }}
-              >
-                <option value="">Choose saved work</option>
-                {quoteCannedJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}
-              </select>
-              {selectedCannedJob && (
-                <div className={styles.cannedPreview} aria-live="polite">
-                  <p className={styles.cannedFacts}>
-                    {selectedCannedJob.kind === 'repair' ? 'Repair' : 'Maintenance'} · Tier {selectedCannedJob.defaultRequiredSkillTier}
-                  </p>
-                  <ul>
-                    {selectedCannedJob.lines.map((line, index) => (
-                      <li key={`${line.sort}:${index}:${line.description}`}>
-                        <span>{cannedLineLabel(line)} · {line.description}</span>
-                        <strong className={styles.money}>{formatMoneyCents(line.priceCents)}</strong>
-                      </li>
-                    ))}
-                  </ul>
-                  <dl>
-                    <div><dt>Subtotal</dt><dd className={styles.money}>{formatMoneyCents(selectedCannedJob.summary.subtotalCents)}</dd></div>
-                    <div><dt>Tax</dt><dd>{selectedCannedJob.summary.taxCents === null ? 'Not set' : formatMoneyCents(selectedCannedJob.summary.taxCents)}</dd></div>
-                    <div><dt>Total</dt><dd>{selectedCannedJob.summary.totalCents === null ? 'Unavailable' : formatMoneyCents(selectedCannedJob.summary.totalCents)}</dd></div>
-                  </dl>
-                  <button
-                    type="button"
-                    className={styles.cannedApply}
-                    disabled={busy || editor !== null || modal !== null || sourcingJob !== null}
-                    onClick={applyCannedJob}
-                  >
-                    {operation === 'canned' ? 'Adding…' : 'Add canned job'}
-                  </button>
-                </div>
-              )}
-            </section>
-          )}
-
-          <AddRepairJob
-            ticketId={ticket.id}
-            onAdded={() => { void refreshQuote() }}
-          />
-
-          <AddDiagnosticTime
-            ticketId={ticket.id}
-            templates={diagnosticTemplates}
-            onAdded={() => { void refreshQuote() }}
-          />
-
           {current.jobs.length === 0 ? (
             <p className={styles.empty}>No eligible jobs on this ticket.</p>
           ) : (
@@ -1483,6 +1441,7 @@ export function ManualQuoteBuilder({
                 <li
                   key={job.id}
                   className={styles.job}
+                  data-active-job={focusJobId === job.id ? 'true' : undefined}
                   data-change-state={confirmedTarget === `job:${job.id}` ? 'confirmed' : undefined}
                   tabIndex={-1}
                   ref={(element) => {
@@ -1533,7 +1492,7 @@ export function ManualQuoteBuilder({
                               </div>
                             </div>
                             <LineFacts line={line} />
-                            {line.mutable ? <div className={styles.lineControls}>
+                            {line.mutable && job.canEdit ? <div className={styles.lineControls}>
                               <button
                                 type="button"
                                 className={styles.lineAction}
@@ -1568,7 +1527,7 @@ export function ManualQuoteBuilder({
                             </div> : (
                               <div className={styles.lineControls}>
                                 <p className={styles.lineKind}>Sourced · read-only</p>
-                                {line.source === 'vendor_offer' && (
+                                {job.canEdit && line.source === 'vendor_offer' && (
                                   <button
                                     type="button"
                                     className={styles.lineAction}
@@ -1596,7 +1555,7 @@ export function ManualQuoteBuilder({
                         ))}
                       </ul>
                     )}
-                    <div className={styles.addActions}>
+                    {job.canEdit && <div className={styles.addActions}>
                       {(['part', 'labor', 'fee'] as const).map((kind) => {
                         const active = editor?.jobId === job.id
                           && editor.mode === 'create' && editor.kind === kind
@@ -1643,8 +1602,8 @@ export function ManualQuoteBuilder({
                           Source part
                         </button>
                       )}
-                    </div>
-                    {editor?.jobId === job.id && (
+                    </div>}
+                    {job.canEdit && editor?.jobId === job.id && (
                       <LineEditor
                         id={quoteEditorId(job.id)}
                         editor={editor}
@@ -1674,6 +1633,88 @@ export function ManualQuoteBuilder({
               ))}
             </ol>
           )}
+
+          <details
+            className={styles.addWork}
+            onToggle={(event) => setAddWorkOpen(event.currentTarget.open)}
+          >
+            <summary>Add work</summary>
+            {addWorkOpen && <div className={styles.addWorkContent}>
+              {!cannedCatalogAvailable ? (
+                <div className={styles.cannedUnavailable} tabIndex={-1} ref={cannedUnavailableRef}>
+                  <strong>Canned jobs unavailable</strong>
+                  <p>You can still type the work in by hand. Refresh before using the library.</p>
+                  <button type="button" className={styles.lineAction} onClick={reloadCannedPage}>
+                    Refresh canned jobs
+                  </button>
+                </div>
+              ) : quoteCannedJobs.length === 0 ? (
+                <p className={styles.cannedEmpty}>Nothing saved in the library yet. You can still type the work in by hand.</p>
+              ) : (
+                <section className={styles.cannedPicker} aria-labelledby="canned-job-heading">
+                  <div>
+                    <p className={styles.eyebrow}>Saved work</p>
+                    <h3 id="canned-job-heading">Add canned job</h3>
+                  </div>
+                  <label htmlFor="quote-canned-job">Canned job</label>
+                  <select
+                    id="quote-canned-job"
+                    ref={cannedSelectRef}
+                    value={selectedCannedId ?? ''}
+                    disabled={busy}
+                    onChange={(event) => {
+                      setSelectedCannedId(event.target.value || null)
+                      setCannedClientKey(crypto.randomUUID())
+                      selectedFingerprintRef.current = quoteCannedJobs.find((job) => job.id === event.target.value)?.fingerprint ?? null
+                      setError(null)
+                    }}
+                  >
+                    <option value="">Choose saved work</option>
+                    {quoteCannedJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}
+                  </select>
+                  {selectedCannedJob && (
+                    <div className={styles.cannedPreview} aria-live="polite">
+                      <p className={styles.cannedFacts}>
+                        {selectedCannedJob.kind === 'repair' ? 'Repair' : 'Maintenance'} · Tier {selectedCannedJob.defaultRequiredSkillTier}
+                      </p>
+                      <ul>
+                        {selectedCannedJob.lines.map((line, index) => (
+                          <li key={`${line.sort}:${index}:${line.description}`}>
+                            <span>{cannedLineLabel(line)} · {line.description}</span>
+                            <strong className={styles.money}>{formatMoneyCents(line.priceCents)}</strong>
+                          </li>
+                        ))}
+                      </ul>
+                      <dl>
+                        <div><dt>Subtotal</dt><dd className={styles.money}>{formatMoneyCents(selectedCannedJob.summary.subtotalCents)}</dd></div>
+                        <div><dt>Tax</dt><dd>{selectedCannedJob.summary.taxCents === null ? 'Not set' : formatMoneyCents(selectedCannedJob.summary.taxCents)}</dd></div>
+                        <div><dt>Total</dt><dd>{selectedCannedJob.summary.totalCents === null ? 'Unavailable' : formatMoneyCents(selectedCannedJob.summary.totalCents)}</dd></div>
+                      </dl>
+                      <button
+                        type="button"
+                        className={styles.cannedApply}
+                        disabled={busy || editor !== null || modal !== null || sourcingJob !== null}
+                        onClick={applyCannedJob}
+                      >
+                        {operation === 'canned' ? 'Adding…' : 'Add canned job'}
+                      </button>
+                    </div>
+                  )}
+                </section>
+              )}
+
+              <AddRepairJob
+                ticketId={ticket.id}
+                onAdded={() => { void refreshQuote() }}
+              />
+
+              <AddDiagnosticTime
+                ticketId={ticket.id}
+                templates={diagnosticTemplates}
+                onAdded={() => { void refreshQuote() }}
+              />
+            </div>}
+          </details>
         </section>
 
         <QuoteCommitmentPanel

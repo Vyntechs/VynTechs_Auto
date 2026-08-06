@@ -36,11 +36,13 @@ describe('Shop OS immutable quote version creation', () => {
       { id: uuid(2), userId: uuid(102), shopId, role: 'founder' },
       { id: uuid(3), userId: uuid(103), shopId: otherShop.id, role: 'owner' },
       { id: uuid(4), userId: uuid(104), shopId, role: 'advisor' },
+      { id: uuid(5), userId: uuid(105), shopId, role: 'parts' },
+      { id: uuid(6), userId: uuid(106), shopId, role: 'owner' },
     ])
     await db.insert(vendorAccounts).values({
       id: uuid(90), shopId, vendor: 'manual', displayName: 'Main supplier', mode: 'manual',
     })
-    actor = { profileId: uuid(1) }
+    actor = { profileId: uuid(4) }
     await db.insert(customers).values({ id: uuid(10), shopId, name: 'Customer', phone: '5551234567' })
     await db.insert(vehicles).values({
       id: uuid(11), customerId: uuid(10), year: 2020, make: 'Ford', model: 'F-150',
@@ -56,6 +58,7 @@ describe('Shop OS immutable quote version creation', () => {
     await db.insert(ticketJobs).values([
       {
         id: jobId, shopId, ticketId, title: 'Front brakes', kind: 'repair', requiredSkillTier: 1,
+        assignedTechId: uuid(1),
         customerStory: {
           whatYouToldUs: 'Brake noise', whatWeFound: 'Pads are worn',
           howWeKnow: [{ claim: 'Pad thickness is low', sourceEventIds: [uuid(81), uuid(80)], sourceArtifactIds: [] }],
@@ -147,6 +150,21 @@ describe('Shop OS immutable quote version creation', () => {
     expect(helper).toMatch(/\.from\(tickets\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(shops\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(ticketJobs\)[\s\S]*?orderBy\(ticketJobs\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(jobLines\)[\s\S]*?orderBy\(jobLines\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(quoteVersions\)[\s\S]*?orderBy\(quoteVersions\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(profiles\)[\s\S]*?\.for\('update', \{ noWait: true \}\)/)
     expect(source).not.toMatch(/createQuoteVersion[\s\S]*?from\(['"]@\/app\/api/)
     expect(helper).not.toContain('jobAttachments')
+  })
+
+  it('denies technician Prepare before writes while advisor, parts, and owner retain ticket-wide Prepare', async () => {
+    await expect(create({ actor: { profileId: uuid(1) } }))
+      .resolves.toEqual({ ok: false, error: 'not_found' })
+    expect(await db.select().from(quoteVersions)).toHaveLength(0)
+    expect((await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0])
+      .toMatchObject({ approvalState: 'pending_quote', approvedQuoteVersionId: null })
+
+    const prepared = await create({ actor: { profileId: uuid(4) } })
+    expect(prepared).toMatchObject({ ok: true, changed: true })
+    await expect(create({ actor: { profileId: uuid(5) } }))
+      .resolves.toMatchObject({ ok: true, changed: false })
+    await expect(create({ actor: { profileId: uuid(6) } }))
+      .resolves.toMatchObject({ ok: true, changed: false })
   })
 
   it('rejects mutable media provenance while leaving legacy rows and history untouched', async () => {
@@ -567,7 +585,7 @@ describe('Shop OS immutable quote version creation', () => {
   it('deterministically converges same-state calls on one PGlite client and versions later changed state', async () => {
     const expectedDraftFingerprint = await currentDraftFingerprint()
     const [left, right] = await Promise.all([
-      create({ expectedDraftFingerprint, actor: { profileId: uuid(1) } }),
+      create({ expectedDraftFingerprint, actor: { profileId: uuid(5) } }),
       create({ expectedDraftFingerprint, actor: { profileId: uuid(4) } }),
     ])
     expect([left, right].filter((result) => result.ok && result.changed)).toHaveLength(1)
@@ -586,7 +604,7 @@ describe('Shop OS immutable quote version creation', () => {
     const currentFingerprint = await currentDraftFingerprint()
 
     const [stale, current] = await Promise.all([
-      create({ expectedDraftFingerprint: staleFingerprint, actor: { profileId: uuid(1) } }),
+      create({ expectedDraftFingerprint: staleFingerprint, actor: { profileId: uuid(5) } }),
       create({ expectedDraftFingerprint: currentFingerprint, actor: { profileId: uuid(4) } }),
     ])
     expect([stale, current].filter((result) => result.ok && result.changed)).toHaveLength(1)
@@ -682,7 +700,7 @@ describe('Shop OS immutable quote version creation', () => {
   it('fails closed across authorization, tenant, ticket state, reconciliation, tax, and empty boundaries', async () => {
     await expect(create({ actor: { profileId: uuid(2) } })).resolves.toEqual({ ok: false, error: 'not_found' })
     await expect(create({ actor: { profileId: uuid(3) } })).resolves.toEqual({ ok: false, error: 'not_found' })
-    await expect(create({ ticketId: ticketId.toUpperCase(), actor: { profileId: uuid(1).toUpperCase() } })).resolves.toMatchObject({ ok: true })
+    await expect(create({ ticketId: ticketId.toUpperCase(), actor: { profileId: uuid(4).toUpperCase() } })).resolves.toMatchObject({ ok: true })
     await db.update(tickets).set({ status: 'closed' }).where(eq(tickets.id, ticketId))
     await expect(create()).resolves.toEqual({ ok: false, error: 'not_found' })
     await db.update(tickets).set({ status: 'open', source: 'tech_quick', customerId: null, vehicleId: null }).where(eq(tickets.id, ticketId))

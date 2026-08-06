@@ -1,7 +1,6 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppHeader } from '@/components/vt'
 import { LocalizedTimestamp } from '@/components/vt/localized-timestamp'
@@ -85,6 +84,7 @@ const APPROVAL_STATE_LABELS: Record<string, string> = {
 
 const IDENTITY_CORRECTION_TARGET = { kind: 'identity' } as const
 const CONCERN_CORRECTION_TARGET = { kind: 'concern' } as const
+const TICKET_QUOTE_KEY = 'ticket'
 
 export function TicketDetailScreen({
   ticket: initialTicket,
@@ -119,7 +119,6 @@ export function TicketDetailScreen({
   customerCopy?: CustomerCopyProjection | null
   refreshCustomerCopyAction?: (ticketId: string) => Promise<CustomerCopyResult>
 }): React.JSX.Element {
-  const router = useRouter()
   const [correctionTruth, setCorrectionTruth] = useState<{
     ticket: TicketDetail
     quote: TicketCorrectionAppliedProjection['quote']
@@ -140,8 +139,14 @@ export function TicketDetailScreen({
   const [ticketStatus, setTicketStatus] = useState(ticket.status)
   const [customerCopyOpen, setCustomerCopyOpen] = useState(false)
   const [customerCopyStale, setCustomerCopyStale] = useState(false)
+  const [effectiveCustomerCopy, setEffectiveCustomerCopy] = useState(customerCopy)
+  const [customerCopyRefreshing, setCustomerCopyRefreshing] = useState(false)
+  const [customerCopyError, setCustomerCopyError] = useState(false)
+  const [selectedPrimaryJobId, setSelectedPrimaryJobId] = useState<string | null>(null)
+  const [primaryGroupOpen, setPrimaryGroupOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
   const [activeTool, setActiveTool] = useState<
-    | { kind: 'quote' }
+    | { kind: 'quote'; jobId: string | null }
     | { kind: 'work'; jobId: string }
     | { kind: 'correction'; target: TicketCorrectionTarget }
     | null
@@ -151,10 +156,13 @@ export function TicketDetailScreen({
   const identityTargetRef = useRef<HTMLDivElement>(null)
   const concernTargetRef = useRef<HTMLElement>(null)
   const jobRefs = useRef(new Map<string, HTMLLIElement>())
-  const quoteOpenerRef = useRef<HTMLButtonElement>(null)
+  const quoteOpenerRefs = useRef(new Map<string, HTMLButtonElement>())
   const workOpenerRefs = useRef(new Map<string, HTMLButtonElement>())
   const correctionOpenerRefs = useRef(new Map<string, HTMLButtonElement>())
   const ringOutRef = useRef<HTMLElement>(null)
+  const customerCopyGenerationRef = useRef(0)
+  const customerCopyRequestRef = useRef(0)
+  const primaryGroupSignatureRef = useRef<string | null>(null)
   const approvalStateRef = useRef(new Map(
     ticket.jobs.map((job) => [job.id, job.approvalState]),
   ))
@@ -201,26 +209,59 @@ export function TicketDetailScreen({
     ringOut: ringOutState,
     diagnosticsEntitled,
   })
-  const allCommands = commands.primary
-    ? [commands.primary, ...commands.secondary]
-    : commands.secondary
-  const quoteCommand = allCommands.find((command) => command.kind === 'quote') ?? null
-  const ringOutCommand = allCommands.find((command) => (
+  const primaryCommand = commands.primary?.kind === 'quote' && !canBuildQuote
+    ? null
+    : commands.primary
+  const primaryGroupCommands = (commands.primaryGroup?.commands ?? []).filter((command) => (
+    command.kind !== 'quote' || canBuildQuote
+  ))
+  const secondaryCommands = commands.secondary.filter((command) => (
+    command.kind !== 'quote' || canBuildQuote
+  ))
+  const selectedPrimaryCommand = primaryGroupCommands.length > 1
+    ? primaryGroupCommands.find((command) => command.jobId === selectedPrimaryJobId) ?? null
+    : null
+  const projectedCommands = [
+    ...(primaryCommand ? [primaryCommand] : []),
+    ...(primaryGroupCommands.length === 1 ? primaryGroupCommands : []),
+    ...(selectedPrimaryCommand ? [selectedPrimaryCommand] : []),
+    ...(moreOpen ? secondaryCommands : []),
+  ]
+  const emphasizedCommand = selectedPrimaryCommand
+    ?? primaryCommand
+    ?? (primaryGroupCommands.length === 1 ? primaryGroupCommands[0] : null)
+  const visibleCommands = activeTool?.kind === 'quote' ? [] : projectedCommands
+  const ticketQuoteCommand = visibleCommands.find((command) => (
+    command.kind === 'quote' && command.jobId === undefined
+  )) ?? null
+  const ringOutCommand = visibleCommands.find((command) => (
     command.kind === 'ring_out' || command.kind === 'close'
   )) ?? null
+  const commandProjectionSignature = `${commandSignature(commands)}|canBuildQuote:${String(canBuildQuote)}`
+  const primaryGroupCommandSignature = primaryGroupCommands.map(commandIdentity).join('|')
   const legacyQuoteFallback = !currentProfileId || !role
   const correctionAvailable = canCorrectTicket
     && canAssignWork(role)
     && currentProfileId !== null
     && ticketStatus === 'open'
   const toolBlocked = activeTool !== null || lifecycleMutationActive
-  const invalidateCustomerCopy = useCallback(() => {
-    if (!customerCopy) return
+  const markCustomerCopyStale = useCallback(() => {
+    if (!effectiveCustomerCopy) return
+    customerCopyGenerationRef.current += 1
+    customerCopyRequestRef.current += 1
     setCustomerCopyOpen(false)
     setCustomerCopyStale(true)
-    router.refresh()
-  }, [customerCopy, router])
+    setCustomerCopyError(false)
+    setCustomerCopyRefreshing(false)
+  }, [effectiveCustomerCopy])
   const applyQuoteProjection = useCallback((projection: QuoteWorkspaceProjection) => {
+    const preparedJobs = projection.filter((projected) => (
+      approvalStateRef.current.get(projected.id) === 'pending_quote'
+        && projected.approvalState === 'quote_ready'
+    ))
+    const preparedJob = (activeTool?.kind === 'quote' && activeTool.jobId
+      ? preparedJobs.find((projected) => projected.id === activeTool.jobId)
+      : null) ?? preparedJobs[0]
     const financialStateChanged = projection.some((projected) => (
       approvalStateRef.current.get(projected.id) !== projected.approvalState
     ))
@@ -242,10 +283,19 @@ export function TicketDetailScreen({
       }
       return changed ? next : current
     })
-    if (financialStateChanged) invalidateCustomerCopy()
-  }, [invalidateCustomerCopy])
+    if (financialStateChanged) markCustomerCopyStale()
+    if (preparedJob && activeTool?.kind === 'quote') {
+      setActiveTool(null)
+      setTimeout(() => {
+        const target = quoteOpenerRefs.current.get(preparedJob.id)
+          ?? jobRefs.current.get(preparedJob.id)
+        target?.focus()
+      }, 0)
+    }
+  }, [activeTool, markCustomerCopyStale])
   const openCorrection = useCallback((target: TicketCorrectionTarget) => {
     if (activeTool !== null || lifecycleMutationActiveRef.current) return
+    setCustomerCopyOpen(false)
     setConfirmedCorrection(null)
     setActiveTool({ kind: 'correction', target })
   }, [activeTool])
@@ -260,10 +310,7 @@ export function TicketDetailScreen({
     setWorkOverrides(new Map())
     setEscalatedJobs([])
     setTicketStatus(result.ticket.status)
-    if (customerCopy) {
-      setCustomerCopyOpen(false)
-      setCustomerCopyStale(true)
-    }
+    markCustomerCopyStale()
     setConfirmedCorrection({
       target: result.target,
       outcome: result.outcome,
@@ -279,10 +326,18 @@ export function TicketDetailScreen({
         jobRefs.current,
       )?.focus()
     }, 0)
-  }, [customerCopy])
+  }, [markCustomerCopyStale])
   useEffect(() => setTicketStatus(ticket.status), [ticket.status])
   useEffect(() => setRingOutState(ringOut), [ringOut])
-  useEffect(() => setCustomerCopyStale(false), [customerCopy])
+  useEffect(() => {
+    customerCopyGenerationRef.current += 1
+    customerCopyRequestRef.current += 1
+    setEffectiveCustomerCopy(customerCopy)
+    setCustomerCopyStale(false)
+    setCustomerCopyError(false)
+    setCustomerCopyOpen(false)
+    setCustomerCopyRefreshing(false)
+  }, [customerCopy])
   useEffect(() => {
     approvalStateRef.current = new Map(ticket.jobs.map((job) => [job.id, job.approvalState]))
   }, [ticket.jobs])
@@ -290,6 +345,48 @@ export function TicketDetailScreen({
     setCorrectionTruth(null)
     setConfirmedCorrection(null)
   }, [initialTicket])
+  useEffect(() => {
+    const previousPrimaryGroupSignature = primaryGroupSignatureRef.current
+    const primaryGroupChanged = previousPrimaryGroupSignature !== null
+      && previousPrimaryGroupSignature !== primaryGroupCommandSignature
+    primaryGroupSignatureRef.current = primaryGroupCommandSignature
+    setMoreOpen(false)
+    setPrimaryGroupOpen(false)
+    setSelectedPrimaryJobId((selected) => (
+      selected && !primaryGroupChanged && primaryGroupCommands.length > 1
+        && primaryGroupCommands.some((command) => command.jobId === selected)
+        ? selected
+        : null
+    ))
+  }, [commandProjectionSignature, primaryGroupCommandSignature])
+
+  async function refreshStaleCustomerCopy(): Promise<void> {
+    if (!customerCopyStale || customerCopyRefreshing) return
+    const generation = customerCopyGenerationRef.current
+    const requestId = customerCopyRequestRef.current + 1
+    customerCopyRequestRef.current = requestId
+    setCustomerCopyRefreshing(true)
+    setCustomerCopyError(false)
+    try {
+      const result = refreshCustomerCopyAction
+        ? await refreshCustomerCopyAction(ticket.id)
+        : null
+      if (customerCopyGenerationRef.current !== generation
+        || customerCopyRequestRef.current !== requestId) return
+      if (!isCustomerCopySuccess(result)) {
+        setCustomerCopyError(true)
+        return
+      }
+      setEffectiveCustomerCopy(result.copy)
+      setCustomerCopyStale(false)
+      setCustomerCopyOpen(true)
+    } catch {
+      if (customerCopyGenerationRef.current === generation
+        && customerCopyRequestRef.current === requestId) setCustomerCopyError(true)
+    } finally {
+      if (customerCopyRequestRef.current === requestId) setCustomerCopyRefreshing(false)
+    }
+  }
 
   return (
     <main className={`app ${styles.screen}`} data-customer-copy-shell>
@@ -315,22 +412,61 @@ export function TicketDetailScreen({
         </header>
 
         {((ticketStatus === 'open' && (
-          (canBuildQuote && (quoteCommand || legacyQuoteFallback)) || ringOutCommand
-        )) || customerCopy) && (
+          (canBuildQuote && (ticketQuoteCommand || legacyQuoteFallback))
+            || primaryGroupCommands.length > 1 || secondaryCommands.length > 0 || ringOutCommand
+        )) || effectiveCustomerCopy) && (
           <div className={styles.actions}>
-            {canBuildQuote && (quoteCommand ? (
+            {commands.primaryGroup && primaryGroupCommands.length > 1
+              && !selectedPrimaryCommand && activeTool === null && (
+              <div className={styles.commandGroup}>
+                <button
+                  type="button"
+                  className={styles.quoteAction}
+                  aria-expanded={primaryGroupOpen}
+                  onClick={() => setPrimaryGroupOpen((open) => !open)}
+                >
+                  {primaryGroupCommands.length === commands.primaryGroup.commands.length
+                    ? commands.primaryGroup.label
+                    : `${primaryGroupCommands.length} jobs need attention`}
+                </button>
+                {primaryGroupOpen && (
+                  <div className={styles.commandChoices}>
+                    {primaryGroupCommands.map((command) => {
+                      const groupJob = displayedJobs.find((job) => job.id === command.jobId)
+                      return groupJob ? (
+                        <button
+                          key={commandIdentity(command)}
+                          type="button"
+                          onClick={() => {
+                            setSelectedPrimaryJobId(groupJob.id)
+                            setPrimaryGroupOpen(false)
+                            setTimeout(() => jobRefs.current.get(groupJob.id)?.focus(), 0)
+                          }}
+                        >
+                          {groupJob.title}
+                        </button>
+                      ) : null
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+            {canBuildQuote && (ticketQuoteCommand ? (
               <button
-                ref={quoteOpenerRef}
+                ref={(element) => setQuoteOpenerRef(quoteOpenerRefs.current, null, element)}
                 type="button"
                 className={styles.quoteAction}
-                aria-expanded={activeTool?.kind === 'quote'}
+                aria-expanded={activeTool?.kind === 'quote' && activeTool.jobId === null}
                 aria-controls={inlineQuoteWorkspaceId(ticket.id)}
                 disabled={toolBlocked}
                 onClick={() => {
-                  if (!lifecycleMutationActiveRef.current) setActiveTool({ kind: 'quote' })
+                  if (!lifecycleMutationActiveRef.current) {
+                    setCustomerCopyOpen(false)
+                    setActiveTool({ kind: 'quote', jobId: null })
+                  }
                 }}
               >
-                {quoteCommand.label}
+                {ticketQuoteCommand.label}
               </button>
             ) : legacyQuoteFallback ? (
               <Link
@@ -349,32 +485,51 @@ export function TicketDetailScreen({
                 {ringOutCommand.label}
               </button>
             )}
-            {customerCopy && (
+            {secondaryCommands.length > 0 && activeTool === null && (
+              <button
+                type="button"
+                className={styles.moreAction}
+                aria-expanded={moreOpen}
+                onClick={() => setMoreOpen((open) => !open)}
+              >
+                More
+              </button>
+            )}
+            {effectiveCustomerCopy && (
               <button
                 type="button"
                 className={styles.customerCopyAction}
                 aria-expanded={customerCopyOpen}
-                disabled={customerCopyStale}
-                onClick={() => setCustomerCopyOpen((open) => !open)}
+                disabled={toolBlocked || customerCopyRefreshing}
+                onClick={() => {
+                  if (customerCopyStale) void refreshStaleCustomerCopy()
+                  else setCustomerCopyOpen((open) => !open)
+                }}
               >
                 {customerCopyStale
-                  ? 'Refreshing customer copy…'
+                  ? customerCopyRefreshing ? 'Refreshing customer copy…' : 'Refresh customer copy'
                   : customerCopyOpen ? 'Hide customer copy' : 'Customer copy'}
               </button>
             )}
           </div>
         )}
 
-        {customerCopyOpen && customerCopy && (
+        {customerCopyError && (
+          <p className={styles.customerCopyError} role="alert">
+            Customer copy could not be refreshed. Nothing was reopened or printed. Try again.
+          </p>
+        )}
+
+        {customerCopyOpen && !customerCopyStale && effectiveCustomerCopy && (
           <CustomerCopy
-            copy={customerCopy}
+            copy={effectiveCustomerCopy}
             canManageShopIdentity={role === 'owner'}
             ticketId={ticket.id}
             refreshCopy={refreshCustomerCopyAction}
           />
         )}
 
-        {activeTool?.kind === 'quote' && currentProfileId && (
+        {activeTool?.kind === 'quote' && activeTool.jobId === null && currentProfileId && (
           <InlineQuoteWorkspace
             actorId={currentProfileId}
             workspaceId={inlineQuoteWorkspaceId(ticket.id)}
@@ -390,10 +545,11 @@ export function TicketDetailScreen({
               } : null,
             }}
             canCreateVendorAccount={canCreateVendorAccount}
+            focusJobId={null}
             onProjection={applyQuoteProjection}
             onClose={() => {
               setActiveTool(null)
-              setTimeout(() => quoteOpenerRef.current?.focus(), 0)
+              setTimeout(() => quoteOpenerRefs.current.get(TICKET_QUOTE_KEY)?.focus(), 0)
             }}
           />
         )}
@@ -679,7 +835,27 @@ export function TicketDetailScreen({
 
                   <div className={styles.assignmentRow}>
                     <p>{assigneeLabel(job, assignmentOverrides.get(job.id))}</p>
-                    {cancelJobCommandFor(allCommands, job.id) ? (
+                    {quoteCommandFor(visibleCommands, job.id) && canBuildQuote ? (
+                      <button
+                        ref={(element) => setQuoteOpenerRef(quoteOpenerRefs.current, job.id, element)}
+                        type="button"
+                        className={emphasizedCommand
+                          && commandIdentity(emphasizedCommand) === commandIdentity(quoteCommandFor(visibleCommands, job.id)!)
+                          ? styles.inlinePrimaryAction
+                          : styles.inlineAction}
+                        aria-expanded={activeTool?.kind === 'quote' && activeTool.jobId === job.id}
+                        aria-controls={inlineQuoteWorkspaceId(ticket.id)}
+                        disabled={toolBlocked}
+                        onClick={() => {
+                          if (!lifecycleMutationActiveRef.current) {
+                            setCustomerCopyOpen(false)
+                            setActiveTool({ kind: 'quote', jobId: job.id })
+                          }
+                        }}
+                      >
+                        {quoteCommandFor(visibleCommands, job.id)?.label}
+                      </button>
+                    ) : cancelJobCommandFor(visibleCommands, job.id) ? (
                       <TicketInterruptionAction
                         ticketId={ticket.id}
                         jobId={job.id}
@@ -693,7 +869,7 @@ export function TicketDetailScreen({
                           setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
                         }}
                       />
-                    ) : resolveHoldCommandFor(allCommands, job.id) ? (
+                    ) : resolveHoldCommandFor(visibleCommands, job.id) ? (
                       <TicketInterruptionAction
                         ticketId={ticket.id}
                         jobId={job.id}
@@ -706,7 +882,7 @@ export function TicketDetailScreen({
                           setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
                         }}
                       />
-                    ) : workCommandFor(allCommands, job.id) && ticket.customer && ticket.vehicle ? (
+                    ) : workCommandFor(visibleCommands, job.id) && ticket.customer && ticket.vehicle ? (
                       <button
                         ref={(element) => {
                           if (element) workOpenerRefs.current.set(job.id, element)
@@ -718,21 +894,53 @@ export function TicketDetailScreen({
                         disabled={toolBlocked}
                         onClick={() => {
                           if (!lifecycleMutationActiveRef.current) {
+                            setCustomerCopyOpen(false)
                             setActiveTool({ kind: 'work', jobId: job.id })
                           }
                         }}
                       >
-                        {workCommandFor(allCommands, job.id)?.label}
+                        {workCommandFor(visibleCommands, job.id)?.label}
                       </button>
-                    ) : simpleWorkLink(
+                    ) : activeTool === null ? simpleWorkLink(
                       ticket,
                       job,
                       currentProfileId,
                       diagnosticsEntitled,
                       assignmentOverrides.get(job.id),
                       role === 'tech',
-                    )}
+                    ) : null}
                   </div>
+                  {activeTool?.kind === 'quote'
+                    && activeTool.jobId === job.id
+                    && currentProfileId && (
+                      <InlineQuoteWorkspace
+                        actorId={currentProfileId}
+                        workspaceId={inlineQuoteWorkspaceId(ticket.id)}
+                        focusJobId={job.id}
+                        ticket={{
+                          id: ticket.id,
+                          ticketNumber: ticket.ticketNumber,
+                          concern: ticket.concern,
+                          customer: ticket.customer ? { name: ticket.customer.name } : null,
+                          vehicle: ticket.vehicle ? {
+                            year: ticket.vehicle.year,
+                            make: ticket.vehicle.make,
+                            model: ticket.vehicle.model,
+                          } : null,
+                        }}
+                        canCreateVendorAccount={canCreateVendorAccount}
+                        onProjection={applyQuoteProjection}
+                        onClose={() => {
+                          const jobId = job.id
+                          setActiveTool(null)
+                          setTimeout(() => {
+                            const target = quoteOpenerRefs.current.get(jobId)
+                              ?? jobRefs.current.get(jobId)
+                            target?.focus()
+                          }, 0)
+                        }}
+                      />
+                    )}
                   {correctionEligible && (
                     <button
                       ref={(element) => setCorrectionOpenerRef(
@@ -770,52 +978,54 @@ export function TicketDetailScreen({
                   <CorrectionConfirmationView
                     confirmation={confirmationFor(confirmedCorrection, correctionTarget)}
                   />
-                  {activeTool === null && currentProfileId && assignmentCommandFor(allCommands, job.id) && (
-                    <TicketAssignmentControl
-                      ticketId={ticket.id}
-                      job={{
-                        id: job.id,
-                        requiredSkillTier: job.requiredSkillTier,
-                        workStatus: job.workStatus as 'open' | 'in_progress' | 'blocked',
-                        approvalState: job.approvalState,
-                        hasAssignee: assignmentOverrides.has(job.id)
-                          ? assignmentOverrides.get(job.id)?.assignedTechId !== null
-                          : job.assignedTechId !== null,
-                      }}
-                      command={assignmentCommandFor(allCommands, job.id)!}
-                      team={team}
-                      currentProfileId={currentProfileId}
-                      onApplied={(assignment) => {
-                        const selected = team.find((member) => member.id === assignment.assignedTechId)
-                        const assignedTechName = assignment.assignedTechName
-                          ?? (assignment.state === 'mine' ? currentProfileName : selected?.name)
-                          ?? null
-                        setAssignmentOverrides((current) => new Map(current).set(job.id, {
-                          state: assignment.state,
-                          assignedTechId: assignment.assignedTechId,
-                          assignedTechName,
-                          workStatus: assignment.workStatus,
-                          approvalState: assignment.approvalState,
-                          notice: assignment.state === 'unassigned'
-                            ? 'Work is open.'
-                            : assignment.state === 'mine'
-                              ? 'Work is yours.'
-                              : `Assigned to ${assignedTechName ?? 'the selected technician'}.`,
-                        }))
-                        setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
-                      }}
-                      onConflict={({ assignedTechName }) => {
-                        setAssignmentOverrides((current) => new Map(current).set(job.id, {
-                          state: 'team',
-                          assignedTechId: null,
-                          assignedTechName,
-                          workStatus: 'open',
+                  {currentProfileId && assignmentCommandFor(projectedCommands, job.id) && (
+                    <div hidden={activeTool !== null}>
+                      <TicketAssignmentControl
+                        ticketId={ticket.id}
+                        job={{
+                          id: job.id,
+                          requiredSkillTier: job.requiredSkillTier,
+                          workStatus: job.workStatus as 'open' | 'in_progress' | 'blocked',
                           approvalState: job.approvalState,
-                          notice: `${assignedTechName} claimed it first. The repair order is current.`,
-                        }))
-                        setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
-                      }}
-                    />
+                          hasAssignee: assignmentOverrides.has(job.id)
+                            ? assignmentOverrides.get(job.id)?.assignedTechId !== null
+                            : job.assignedTechId !== null,
+                        }}
+                        command={assignmentCommandFor(projectedCommands, job.id)!}
+                        team={team}
+                        currentProfileId={currentProfileId}
+                        onApplied={(assignment) => {
+                          const selected = team.find((member) => member.id === assignment.assignedTechId)
+                          const assignedTechName = assignment.assignedTechName
+                            ?? (assignment.state === 'mine' ? currentProfileName : selected?.name)
+                            ?? null
+                          setAssignmentOverrides((current) => new Map(current).set(job.id, {
+                            state: assignment.state,
+                            assignedTechId: assignment.assignedTechId,
+                            assignedTechName,
+                            workStatus: assignment.workStatus,
+                            approvalState: assignment.approvalState,
+                            notice: assignment.state === 'unassigned'
+                              ? 'Work is open.'
+                              : assignment.state === 'mine'
+                                ? 'Work is yours.'
+                                : `Assigned to ${assignedTechName ?? 'the selected technician'}.`,
+                          }))
+                          setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
+                        }}
+                        onConflict={({ assignedTechName }) => {
+                          setAssignmentOverrides((current) => new Map(current).set(job.id, {
+                            state: 'team',
+                            assignedTechId: null,
+                            assignedTechName,
+                            workStatus: 'open',
+                            approvalState: job.approvalState,
+                            notice: `${assignedTechName} claimed it first. The repair order is current.`,
+                          }))
+                          setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
+                        }}
+                      />
+                    </div>
                   )}
                   {assignmentOverrides.get(job.id)?.notice && (
                     <p className={styles.assignmentNotice} role="status" aria-live="polite">
@@ -849,7 +1059,7 @@ export function TicketDetailScreen({
             onApplied={(next) => {
               setTicketStatus(next.status)
               setActiveTool(null)
-              invalidateCustomerCopy()
+              markCustomerCopyStale()
               setWorkOverrides((current) => {
                 const updated = new Map(current)
                 for (const job of next.jobs) updated.set(job.id, { workStatus: job.workStatus })
@@ -890,7 +1100,7 @@ export function TicketDetailScreen({
               setRingOutState(next)
               setTicketStatus(next.status)
               if (next.status !== 'open') setActiveTool(null)
-              invalidateCustomerCopy()
+              markCustomerCopyStale()
             }}
           />
         )}
@@ -1140,6 +1350,206 @@ function assigneeLabel(
   if (!job.assignedTechId) return 'Open — no technician assigned'
   if (job.assignedTech?.fullName) return `Assigned · ${job.assignedTech.fullName}`
   return 'Assigned technician · Name not provided'
+}
+
+function commandIdentity(command: LivingTicketCommand): string {
+  return `${command.kind}:${command.jobId ?? 'ticket'}`
+}
+
+function commandSignature(commands: ReturnType<typeof projectLivingTicketCommands>): string {
+  return [
+    commands.primary ? `primary:${commandIdentity(commands.primary)}` : 'primary:none',
+    ...(commands.primaryGroup?.commands.map((command) => `group:${commandIdentity(command)}`) ?? []),
+    ...commands.secondary.map((command) => `secondary:${commandIdentity(command)}`),
+  ].join('|')
+}
+
+function setQuoteOpenerRef(
+  refs: Map<string, HTMLButtonElement>,
+  jobId: string | null,
+  element: HTMLButtonElement | null,
+): void {
+  const key = jobId ?? TICKET_QUOTE_KEY
+  if (element) refs.set(key, element)
+  else refs.delete(key)
+}
+
+function quoteCommandFor(
+  commands: LivingTicketCommand[],
+  jobId: string,
+): (LivingTicketCommand & { kind: 'quote'; jobId: string }) | null {
+  const command = commands.find((candidate) => (
+    candidate.kind === 'quote' && candidate.jobId === jobId
+  ))
+  return command
+    ? command as LivingTicketCommand & { kind: 'quote'; jobId: string }
+    : null
+}
+
+function isCustomerCopySuccess(
+  result: unknown,
+): result is { ok: true; copy: CustomerCopyProjection } {
+  if (!isRecord(result)
+    || !hasExactKeys(result, ['ok', 'copy'])
+    || result.ok !== true
+    || !isRecord(result.copy)) return false
+  const copy = result.copy
+  if (!hasExactKeys(copy, [
+    'documentKind', 'readyToPrint', 'blockers', 'shop', 'ticketNumber', 'customer',
+    'vehicle', 'jobs', 'decisions', 'totals', 'closedAt',
+  ])
+    || !['estimate', 'invoice', 'paid_receipt'].includes(String(copy.documentKind))
+    || typeof copy.readyToPrint !== 'boolean'
+    || !Array.isArray(copy.blockers)
+    || !copy.blockers.every((value) => (
+      ['shop_phone', 'shop_address_line_1', 'shop_city', 'shop_region', 'shop_postal_code', 'pricing_unavailable']
+        .includes(String(value))
+    ))
+    || new Set(copy.blockers).size !== copy.blockers.length
+    || copy.readyToPrint !== (copy.blockers.length === 0)
+    || !isCustomerCopyShop(copy.shop)
+    || !isSafeNonnegativeInteger(copy.ticketNumber)
+    || !isCustomerCopyCustomer(copy.customer)
+    || !isCustomerCopyVehicle(copy.vehicle)
+    || !Array.isArray(copy.jobs) || !copy.jobs.every(isCustomerCopyJob)
+    || !Array.isArray(copy.decisions) || !copy.decisions.every(isCustomerCopyDecision)
+    || !isCustomerCopyTotals(copy.totals)
+    || !(copy.closedAt === null || isExactIsoTimestamp(copy.closedAt))) return false
+  const validatedCopy = copy as CustomerCopyProjection
+  const lineSubtotalCents = sumCustomerCopyLineCents(validatedCopy.jobs)
+  if (!validatedCopy.blockers.includes('pricing_unavailable')
+    && lineSubtotalCents !== validatedCopy.totals.subtotalCents) return false
+  return !validatedCopy.blockers.includes('pricing_unavailable') || validatedCopy.jobs.length === 0
+}
+
+function isCustomerCopyShop(value: unknown): boolean {
+  return isRecord(value)
+    && hasExactKeys(value, ['name', 'phone', 'address'])
+    && typeof value.name === 'string'
+    && (value.phone === null || typeof value.phone === 'string')
+    && Array.isArray(value.address)
+    && value.address.every((line) => typeof line === 'string')
+}
+
+function isCustomerCopyCustomer(value: unknown): boolean {
+  return isRecord(value)
+    && hasExactKeys(value, ['name'])
+    && typeof value.name === 'string'
+}
+
+function isCustomerCopyVehicle(value: unknown): boolean {
+  return isRecord(value)
+    && hasExactKeys(value, ['year', 'make', 'model', 'vin', 'odometer'])
+    && isSafeNonnegativeInteger(value.year)
+    && typeof value.make === 'string'
+    && typeof value.model === 'string'
+    && (value.vin === null || typeof value.vin === 'string')
+    && (value.odometer === null || isSafeNonnegativeInteger(value.odometer))
+}
+
+function isCustomerCopyJob(value: unknown): boolean {
+  return isRecord(value)
+    && hasExactKeys(value, ['title', 'kind', 'lines'])
+    && typeof value.title === 'string'
+    && ['diagnostic', 'repair', 'maintenance'].includes(String(value.kind))
+    && Array.isArray(value.lines)
+    && value.lines.every(isCustomerCopyLine)
+}
+
+function isCustomerCopyLine(value: unknown): boolean {
+  if (!isRecord(value)
+    || typeof value.description !== 'string'
+    || !isSafeCents(value.priceCents)
+    || typeof value.taxable !== 'boolean') return false
+  if (value.kind === 'part') return hasExactKeys(value, [
+    'kind', 'description', 'quantity', 'priceCents', 'taxable', 'partNumber', 'brand',
+  ])
+    && typeof value.quantity === 'string'
+    && (value.partNumber === null || typeof value.partNumber === 'string')
+    && (value.brand === null || typeof value.brand === 'string')
+  if (value.kind === 'labor') return hasExactKeys(value, [
+    'kind', 'description', 'hours', 'priceCents', 'taxable', 'laborRateCents',
+  ])
+    && typeof value.hours === 'string'
+    && (value.laborRateCents === null || isSafeCents(value.laborRateCents))
+  return value.kind === 'fee'
+    && hasExactKeys(value, ['kind', 'description', 'priceCents', 'taxable'])
+}
+
+function sumCustomerCopyLineCents(jobs: CustomerCopyProjection['jobs']): number | null {
+  let subtotalCents = 0
+  for (const job of jobs) {
+    for (const line of job.lines) {
+      subtotalCents += line.priceCents
+      if (!Number.isSafeInteger(subtotalCents)) return null
+    }
+  }
+  return subtotalCents
+}
+
+function isCustomerCopyDecision(value: unknown): boolean {
+  return isRecord(value)
+    && hasExactKeys(value, ['jobTitle', 'decision', 'method', 'recordedAt'])
+    && typeof value.jobTitle === 'string'
+    && ['approved', 'declined', 'deferred'].includes(String(value.decision))
+    && (value.method === null || ['phone', 'in_person'].includes(String(value.method)))
+    && isExactIsoTimestamp(value.recordedAt)
+}
+
+function isCustomerCopyTotals(value: unknown): boolean {
+  if (!isRecord(value)
+    || !hasExactKeys(value, [
+      'subtotalCents', 'taxCents', 'totalCents', 'payments', 'paidCents', 'balanceCents',
+    ])
+    || !isSafeCents(value.subtotalCents)
+    || !isSafeCents(value.taxCents)
+    || !isSafeCents(value.totalCents)
+    || !isSafeCents(value.paidCents)
+    || !isSafeCents(value.balanceCents)
+    || !Array.isArray(value.payments)) return false
+  if (value.subtotalCents + value.taxCents !== value.totalCents
+    || value.totalCents - value.paidCents !== value.balanceCents) return false
+  let paymentTotal = 0
+  for (const payment of value.payments) {
+    if (!isCustomerCopyPayment(payment)) return false
+    paymentTotal += payment.amountCents
+    if (!Number.isSafeInteger(paymentTotal)) return false
+  }
+  return paymentTotal === value.paidCents
+}
+
+function isCustomerCopyPayment(
+  value: unknown,
+): value is CustomerCopyProjection['totals']['payments'][number] {
+  return isRecord(value)
+    && hasExactKeys(value, ['amountCents', 'method', 'recordedAt'])
+    && isSafeCents(value.amountCents)
+    && ['cash', 'card', 'check', 'other'].includes(String(value.method))
+    && isExactIsoTimestamp(value.recordedAt)
+}
+
+function isSafeCents(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function isSafeNonnegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function isExactIsoTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  const parsed = new Date(value)
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString() === value
+}
+
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(value)
+  return actual.length === keys.length
+    && keys.every((key) => Object.prototype.hasOwnProperty.call(value, key))
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }
 
 function assignmentCommandFor(

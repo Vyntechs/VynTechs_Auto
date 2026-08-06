@@ -22,6 +22,7 @@ describe('quote preparation readiness', () => {
     },
     jobs: [{
       id: '00000000-0000-4000-8000-000000000201', title: 'Labor', kind: 'repair', workStatus: 'open',
+      canEdit: true,
       story: { content: null, source: null, reviewStatus: null, revision: 0 },
       storyMode: null,
       decisionEligible: false,
@@ -34,7 +35,7 @@ describe('quote preparation readiness', () => {
         lineFingerprint: 'a'.repeat(64),
       }],
     }],
-    capabilities: { canRecordCustomerApproval: false },
+    capabilities: { canPrepareQuote: true, canRecordCustomerApproval: false },
     activeVersion: null,
     lastPreparedVersion: null,
     draftCommitment: {
@@ -224,6 +225,7 @@ describe('quote builder refresh projection validation', () => {
     },
     jobs: [{
       id: '00000000-0000-4000-8000-000000000201', title: 'Brake service', kind: 'repair', workStatus: 'open',
+      canEdit: true,
       story: { content: null, source: null, reviewStatus: null, revision: 0 },
       storyMode: null,
       decisionEligible: false,
@@ -237,6 +239,7 @@ describe('quote builder refresh projection validation', () => {
       }],
     }],
     capabilities: {
+      canPrepareQuote: true,
       canRecordCustomerApproval: false,
       canCreateCustomerApprovalLink: false,
     },
@@ -252,6 +255,31 @@ describe('quote builder refresh projection validation', () => {
       jobs: [{ ...valid.jobs[0], kind: 'diagnostic', storyMode: 'unavailable' }],
     }
     expect(parseQuoteBuilderProjection(unavailable)).toEqual(unavailable)
+  })
+
+  it('requires exact server-projected job edit and Prepare capabilities', () => {
+    expect(parseQuoteBuilderProjection({
+      ...valid,
+      jobs: valid.jobs.map(({ canEdit: _canEdit, ...job }) => job),
+    })).toBeNull()
+    expect(parseQuoteBuilderProjection({
+      ...valid,
+      jobs: [{ ...valid.jobs[0], canEdit: 'true' }],
+    })).toBeNull()
+    expect(parseQuoteBuilderProjection({
+      ...valid,
+      jobs: [{ ...valid.jobs[0], canEdit: true, extraCapability: false }],
+    })).toBeNull()
+    const { canPrepareQuote: _canPrepareQuote, ...capabilities } = valid.capabilities
+    expect(parseQuoteBuilderProjection({ ...valid, capabilities })).toBeNull()
+    expect(parseQuoteBuilderProjection({
+      ...valid,
+      capabilities: { ...valid.capabilities, canPrepareQuote: 'true' },
+    })).toBeNull()
+    expect(parseQuoteBuilderProjection({
+      ...valid,
+      capabilities: { ...valid.capabilities, extraCapability: false },
+    })).toBeNull()
   })
 
   it('requires exact canonical commitment and line-revision truth', () => {

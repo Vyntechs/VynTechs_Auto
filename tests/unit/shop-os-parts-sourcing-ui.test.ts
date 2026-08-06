@@ -83,6 +83,7 @@ function diagnosisJob(
     title: 'Charging system',
     kind: 'diagnostic',
     workStatus: 'open',
+    canEdit: true,
     story: {
       content: {
         whatYouToldUs: 'The battery light is on.',

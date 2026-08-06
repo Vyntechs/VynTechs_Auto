@@ -60,11 +60,16 @@ function rawQuote(overrides: Record<string, unknown> = {}) {
     jobs: [{
       id: IDS.job, title: 'Diagnose brake vibration', kind: 'diagnostic',
       customerSuppliedPartsNote: null, workStatus: 'open',
+      canEdit: true,
       story: { content: null, source: null, reviewStatus: null, revision: 0 },
       storyMode: 'authorization_only', decisionEligible: true,
       approval: { state: 'quote_ready', quoteVersionId: null }, lines: [],
     }],
-    capabilities: { canRecordCustomerApproval: true, canCreateCustomerApprovalLink: true },
+    capabilities: {
+      canPrepareQuote: true,
+      canRecordCustomerApproval: true,
+      canCreateCustomerApprovalLink: true,
+    },
     activeVersion: {
       id: IDS.version, versionNumber: 1, totalCents: 18750,
       contentFingerprint: 'a'.repeat(64),

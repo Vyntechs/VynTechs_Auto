@@ -6,6 +6,7 @@ import {
   createDraftLine, deleteDraftLine, getQuoteBuilder, manualDraftLineFingerprint,
   quoteSnapshotFingerprint, replaceDraftLine, type QuoteActor,
 } from '@/lib/shop-os/quotes'
+import { canEditQuoteJob, canPrepareQuotes } from '@/lib/shop-os/capabilities'
 import {
   customers, jobLines, profiles, quoteSends, quoteVersions, sessionEvents, sessions, shops,
   ticketJobs, tickets, vehicles, vendorAccounts,
@@ -45,6 +46,8 @@ describe('Shop OS quote builder read model', () => {
       { id: uuid(3), userId: uuid(103), shopId, role: 'founder' },
       { id: uuid(4), userId: uuid(104), shopId, role: 'advisor' },
       { id: uuid(5), userId: uuid(105), shopId, role: 'parts' },
+      { id: uuid(6), userId: uuid(106), shopId, role: 'tech' },
+      { id: uuid(7), userId: uuid(107), shopId, role: 'owner' },
     ])
     await db.insert(customers).values({ id: uuid(10), shopId, name: 'Customer', phone: '5551234567' })
     await db.insert(vehicles).values({
@@ -59,7 +62,8 @@ describe('Shop OS quote builder read model', () => {
         customerId: null, vehicleId: null, concern: 'Other', createdByProfileId: uuid(2) },
     ])
     await db.insert(ticketJobs).values([
-      { id: uuid(30), shopId, ticketId, title: 'Front brakes', kind: 'repair', requiredSkillTier: 1 },
+      { id: uuid(30), shopId, ticketId, title: 'Front brakes', kind: 'repair', requiredSkillTier: 1,
+        assignedTechId: uuid(1) },
       { id: uuid(31), shopId, ticketId, title: 'Canceled', kind: 'maintenance', requiredSkillTier: 1,
         workStatus: 'canceled' },
     ])
@@ -98,6 +102,60 @@ describe('Shop OS quote builder read model', () => {
     expect(handler).not.toMatch(/\.from\(tickets\)[\s\S]*?\.for\('update'/)
   })
 
+  it('projects mixed-job technician truth and ticket-wide advisor, parts, and owner authority', async () => {
+    await db.insert(ticketJobs).values({
+      id: uuid(32), shopId, ticketId, title: 'Rear brakes', kind: 'repair', requiredSkillTier: 1,
+      assignedTechId: uuid(6), approvalState: 'pending_quote',
+    })
+
+    await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toMatchObject({
+      ok: true,
+      builder: {
+        jobs: [
+          { id: uuid(30), title: 'Front brakes', canEdit: true },
+          { id: uuid(32), title: 'Rear brakes', canEdit: false },
+        ],
+        capabilities: { canPrepareQuote: false },
+      },
+    })
+    for (const profileId of [uuid(4), uuid(5), uuid(7)]) {
+      await expect(getQuoteBuilder(db, { actor: { profileId }, ticketId })).resolves.toMatchObject({
+        ok: true,
+        builder: {
+          jobs: [{ id: uuid(30), canEdit: true }, { id: uuid(32), canEdit: true }],
+          capabilities: { canPrepareQuote: true },
+        },
+      })
+    }
+
+    for (const approvalState of ['quote_ready', 'sent', 'declined', 'deferred'] as const) {
+      await db.update(ticketJobs).set({ approvalState }).where(eq(ticketJobs.id, uuid(30)))
+      const result = await getQuoteBuilder(db, { actor, ticketId })
+      expect(result.ok && result.builder.jobs.find((job) => job.id === uuid(30)))
+        .toMatchObject({ id: uuid(30), canEdit: false })
+    }
+    await db.update(ticketJobs).set({ approvalState: 'pending_quote', assignedTechId: null })
+      .where(eq(ticketJobs.id, uuid(30)))
+    const unassigned = await getQuoteBuilder(db, { actor, ticketId })
+    expect(unassigned.ok && unassigned.builder.jobs.find((job) => job.id === uuid(30)))
+      .toMatchObject({ id: uuid(30), canEdit: false })
+  })
+
+  it('exposes pure quote edit and Prepare capability checks without broadening unknown roles', () => {
+    expect(canEditQuoteJob('tech', uuid(1), uuid(1))).toBe(true)
+    expect(canEditQuoteJob('tech', uuid(1), uuid(6))).toBe(false)
+    expect(canEditQuoteJob('tech', null, null)).toBe(false)
+    expect(canEditQuoteJob('advisor', uuid(1), null)).toBe(true)
+    expect(canEditQuoteJob('parts', uuid(1), uuid(6))).toBe(true)
+    expect(canEditQuoteJob('owner', uuid(1), null)).toBe(true)
+    expect(canEditQuoteJob('founder', uuid(1), uuid(1))).toBe(false)
+    expect(canPrepareQuotes('tech')).toBe(false)
+    expect(canPrepareQuotes('advisor')).toBe(true)
+    expect(canPrepareQuotes('parts')).toBe(true)
+    expect(canPrepareQuotes('owner')).toBe(true)
+    expect(canPrepareQuotes('founder')).toBe(false)
+  })
+
   it('classifies an injected read failure without masking unexpected errors', async () => {
     const lockError = Object.assign(new Error('held ticket'), { code: '55P03' })
     await expect(getQuoteBuilder(db, { actor, ticketId }, {
@@ -121,6 +179,7 @@ describe('Shop OS quote builder read model', () => {
         },
         jobs: [{
           id: uuid(30), title: 'Front brakes', kind: 'repair', workStatus: 'open',
+          canEdit: true,
           story: { content: null, source: null, reviewStatus: null, revision: 0 },
           storyMode: null,
           decisionEligible: false,
@@ -138,6 +197,7 @@ describe('Shop OS quote builder read model', () => {
           }],
         }],
         capabilities: {
+          canPrepareQuote: false,
           canRecordCustomerApproval: false,
           canCreateCustomerApprovalLink: false,
         },
@@ -487,6 +547,7 @@ describe('Shop OS quote builder read model', () => {
           approval: { state: 'quote_ready', quoteVersionId: null },
         }],
         capabilities: {
+          canPrepareQuote: false,
           canRecordCustomerApproval: false,
           canCreateCustomerApprovalLink: false,
         },
@@ -496,6 +557,7 @@ describe('Shop OS quote builder read model', () => {
       ok: true,
       builder: {
         capabilities: {
+          canPrepareQuote: true,
           canRecordCustomerApproval: true,
           canCreateCustomerApprovalLink: false,
         },
@@ -506,6 +568,7 @@ describe('Shop OS quote builder read model', () => {
       ok: true,
       builder: {
         capabilities: {
+          canPrepareQuote: true,
           canRecordCustomerApproval: true,
           canCreateCustomerApprovalLink: true,
         },
@@ -515,6 +578,7 @@ describe('Shop OS quote builder read model', () => {
       ok: true,
       builder: {
         capabilities: {
+          canPrepareQuote: true,
           canRecordCustomerApproval: false,
           canCreateCustomerApprovalLink: false,
         },
@@ -627,7 +691,7 @@ describe('Shop OS quote builder read model', () => {
       coreChargeCents: 100, fitment: 'Front',
     }
     await expect(replaceDraftLine(db, {
-      actor, ticketId, jobId: uuid(30), lineId: uuid(40),
+      actor: { profileId: uuid(4) }, ticketId, jobId: uuid(30), lineId: uuid(40),
       expectedLineFingerprint: staleFingerprint,
       body: changedBody,
     })).resolves.toMatchObject({
@@ -669,12 +733,12 @@ describe('Shop OS quote builder read model', () => {
       links: await db.select().from(quoteSends),
     }
     await expect(replaceDraftLine(db, {
-      actor, ticketId, jobId: uuid(30), lineId: uuid(40),
+      actor: { profileId: uuid(4) }, ticketId, jobId: uuid(30), lineId: uuid(40),
       expectedLineFingerprint: staleFingerprint,
       body: changedBody,
     })).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
     await expect(replaceDraftLine(db, {
-      actor, ticketId, jobId: uuid(30), lineId: uuid(40),
+      actor: { profileId: uuid(4) }, ticketId, jobId: uuid(30), lineId: uuid(40),
       expectedLineFingerprint: staleFingerprint,
       body: {
         kind: 'part', description: 'Pads', quantity: '2', priceCents: 12_500,
@@ -683,7 +747,7 @@ describe('Shop OS quote builder read model', () => {
       },
     })).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
     await expect(deleteDraftLine(db, {
-      actor, ticketId, jobId: uuid(30), lineId: uuid(40),
+      actor: { profileId: uuid(4) }, ticketId, jobId: uuid(30), lineId: uuid(40),
       expectedLineFingerprint: staleFingerprint,
     })).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
     expect({
@@ -719,7 +783,7 @@ describe('Shop OS quote builder read model', () => {
     })
 
     await expect(replaceDraftLine(db, {
-      actor, ticketId, jobId: uuid(30), lineId: uuid(40),
+      actor: { profileId: uuid(4) }, ticketId, jobId: uuid(30), lineId: uuid(40),
       expectedLineFingerprint: manualDraftLineFingerprint(original),
       body: {
         kind: 'part', description: 'Updated pads', quantity: '2', priceCents: 12_500,
@@ -737,17 +801,17 @@ describe('Shop OS quote builder read model', () => {
 
     const [current] = await db.select().from(jobLines).where(eq(jobLines.id, uuid(40)))
     await expect(deleteDraftLine(db, {
-      actor, ticketId, jobId: uuid(30), lineId: uuid(40),
+      actor: { profileId: uuid(4) }, ticketId, jobId: uuid(30), lineId: uuid(40),
       expectedLineFingerprint: manualDraftLineFingerprint(current),
     })).resolves.toEqual({ ok: true, changed: true })
     expect(await db.select().from(jobLines).where(eq(jobLines.id, uuid(40)))).toEqual([])
     await expect(deleteDraftLine(db, {
-      actor, ticketId, jobId: uuid(30), lineId: uuid(40),
+      actor: { profileId: uuid(4) }, ticketId, jobId: uuid(30), lineId: uuid(40),
       expectedLineFingerprint: manualDraftLineFingerprint(current),
     })).resolves.toEqual({ ok: true, changed: false })
 
     const createInput = {
-      actor, ticketId, jobId: uuid(30), clientKey: uuid(97),
+      actor: { profileId: uuid(4) }, ticketId, jobId: uuid(30), clientKey: uuid(97),
       body: { kind: 'fee', description: 'Shop supplies', priceCents: 500, taxable: true },
     }
     const first = await createDraftLine(db, createInput)

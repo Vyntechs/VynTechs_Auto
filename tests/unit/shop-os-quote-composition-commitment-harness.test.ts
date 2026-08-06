@@ -83,7 +83,7 @@ describe('PGlite persistence half of quote composition commitment proof', () => 
       ]).returning()
       await fixture.db.insert(profiles).values([
         { id: uuid(1), userId: uuid(101), shopId: shop.id, role: 'advisor' },
-        { id: uuid(2), userId: uuid(102), shopId: shop.id, role: 'tech' },
+        { id: uuid(2), userId: uuid(102), shopId: shop.id, role: 'parts' },
         { id: uuid(3), userId: uuid(103), shopId: otherShop.id, role: 'owner' },
       ])
       await fixture.db.insert(customers).values({

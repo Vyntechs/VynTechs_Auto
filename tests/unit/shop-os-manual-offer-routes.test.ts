@@ -101,5 +101,15 @@ describe('Shop OS manual offer routes', () => {
     response = await capture(request(offer), params())
     expect(response.status).toBe(409)
     await expect(response.json()).resolves.toEqual({ error: 'conflict', retryable: true })
+
+    captureMock.mockResolvedValue({ ok: false, error: 'not_found' })
+    response = await capture(request(offer), params())
+    expect(response.status).toBe(404)
+    await expect(response.json()).resolves.toEqual({ error: 'not_found' })
+
+    removeMock.mockResolvedValue({ ok: false, error: 'not_found' })
+    response = await remove(new Request('http://localhost/x', { method: 'DELETE' }), removeParams())
+    expect(response.status).toBe(404)
+    await expect(response.json()).resolves.toEqual({ error: 'not_found' })
   })
 })

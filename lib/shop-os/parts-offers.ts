@@ -10,7 +10,7 @@ import {
   tickets,
   vendorAccounts,
 } from '@/lib/db/schema'
-import { canBuildQuotes } from '@/lib/shop-os/capabilities'
+import { canBuildQuotes, canEditQuoteJob } from '@/lib/shop-os/capabilities'
 import {
   ManualPartsAdapter,
   parseManualOfferSnapshot,
@@ -305,7 +305,13 @@ async function lockContext(
     .for('update', { noWait: true })
   if (!ticket || ticket.status !== 'open' || !ticket.customerId || !ticket.vehicleId) return null
 
-  const jobs = await db.select({ id: ticketJobs.id, kind: ticketJobs.kind, workStatus: ticketJobs.workStatus })
+  const jobs = await db.select({
+    id: ticketJobs.id,
+    kind: ticketJobs.kind,
+    workStatus: ticketJobs.workStatus,
+    assignedTechId: ticketJobs.assignedTechId,
+    approvalState: ticketJobs.approvalState,
+  })
     .from(ticketJobs)
     .where(and(eq(ticketJobs.shopId, input.shopId), eq(ticketJobs.ticketId, ticket.id)))
     .orderBy(ticketJobs.id)
@@ -344,7 +350,9 @@ async function lockContext(
     .limit(1)
     .for('update', { noWait: true }) : []
 
-  if (!target || !isEligibleJob(target) || !freshActor || !canBuildQuotes(freshActor.role)) {
+  if (!target || !isEligibleJob(target) || !freshActor || !canBuildQuotes(freshActor.role)
+    || !canEditQuoteJob(freshActor.role, freshActor.id, target.assignedTechId)
+    || (freshActor.role === 'tech' && target.approvalState !== 'pending_quote')) {
     return null
   }
   return {

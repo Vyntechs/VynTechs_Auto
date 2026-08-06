@@ -31,6 +31,7 @@ type Loaded = {
 
 export function InlineQuoteWorkspace({
   actorId,
+  focusJobId = null,
   workspaceId,
   ticket,
   canCreateVendorAccount = false,
@@ -38,6 +39,7 @@ export function InlineQuoteWorkspace({
   onProjection,
 }: {
   actorId: string
+  focusJobId?: string | null
   workspaceId?: string
   ticket: QuoteTicketIdentity
   canCreateVendorAccount?: boolean
@@ -161,6 +163,7 @@ export function InlineQuoteWorkspace({
       ) : (
         <ManualQuoteBuilder
           actorId={actorId}
+          focusJobId={focusJobId}
           ticket={ticket}
           builder={loaded.builder}
           cannedJobs={loaded.cannedJobs}

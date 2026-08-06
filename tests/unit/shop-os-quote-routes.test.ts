@@ -233,6 +233,24 @@ describe('Shop OS quote route contracts', () => {
     expect(response.headers.get('cache-control')).toBe('no-store')
   })
 
+  it('preserves indistinguishable 404 mapping for denied job edits and Prepare', async () => {
+    createLineMock.mockResolvedValue({ ok: false, error: 'not_found' })
+    let response = await createLine(
+      request('/x', 'POST', { clientKey: CLIENT_KEY, line }),
+      jobParams(),
+    )
+    expect(response.status).toBe(404)
+    await expect(response.json()).resolves.toEqual({ error: 'not_found' })
+
+    versionMock.mockResolvedValue({ ok: false, error: 'not_found' })
+    response = await createVersion(
+      request('/x', 'POST', { expectedDraftFingerprint: FINGERPRINT }),
+      ticketParams(),
+    )
+    expect(response.status).toBe(404)
+    await expect(response.json()).resolves.toEqual({ error: 'not_found' })
+  })
+
   it.each([
     { result: { ok: false, error: 'invalid_input' }, status: 422, body: { error: 'invalid_input' } },
     { result: { ok: false, error: 'not_found' }, status: 404, body: { error: 'not_found' } },

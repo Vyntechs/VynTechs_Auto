@@ -49,6 +49,7 @@ describe('living repair order next-move projection', () => {
     for (const role of ['tech', 'advisor', 'parts', 'owner']) {
       expect(project({ role, ticketStatus: 'closed' })).toEqual({
         primary: null,
+        primaryGroup: null,
         secondary: [],
       })
     }
@@ -64,7 +65,7 @@ describe('living repair order next-move projection', () => {
     })
     expect(result.secondary).toContainEqual(expect.objectContaining({
       kind: 'quote',
-      label: 'Build quote',
+      label: 'Build ticket',
     }))
   })
 
@@ -116,10 +117,47 @@ describe('living repair order next-move projection', () => {
       .toBeNull()
   })
 
-  it('keeps price-building with non-technician flows and preserves approval wording', () => {
+  it('projects ticket building to the technician assigned to the pending job', () => {
+    expect(project({
+      jobs: [job({ assignedTechId: PROFILE, approvalState: 'pending_quote' })],
+    }).primary).toEqual({
+      kind: 'quote',
+      jobId: '00000000-0000-0000-0000-000000000201',
+      label: 'Build ticket',
+    })
+  })
+
+  it('keeps unassigned technician work claimable without offering ticket building', () => {
+    const result = project({ jobs: [job({ assignedTechId: null, approvalState: 'pending_quote' })] })
+    const all = result.primary ? [result.primary, ...result.secondary] : result.secondary
+
+    expect(result.primary).toMatchObject({ kind: 'claim', label: 'Claim work' })
+    expect(all.some((command) => command.kind === 'quote')).toBe(false)
+  })
+
+  it('does not offer ticket building to a technician assigned to someone else’s job', () => {
+    const result = project({
+      jobs: [job({ assignedTechId: '00000000-0000-0000-0000-000000000999' })],
+    })
+    const all = result.primary ? [result.primary, ...result.secondary] : result.secondary
+
+    expect(all.some((command) => command.kind === 'quote')).toBe(false)
+  })
+
+  it('keeps ticket building with non-technician flows and preserves approval wording', () => {
+    for (const role of ['parts', 'advisor', 'owner']) {
+      expect(project({
+        role,
+        skillTier: null,
+        jobs: [job({ assignedTechId: '00000000-0000-0000-0000-000000000999' })],
+      }).primary).toMatchObject({
+        kind: 'quote',
+        jobId: '00000000-0000-0000-0000-000000000201',
+        label: 'Build ticket',
+      })
+    }
+
     for (const role of ['parts']) {
-      expect(project({ role, skillTier: null }).primary)
-        .toMatchObject({ kind: 'quote', label: 'Build quote' })
       expect(project({
         role,
         skillTier: null,
@@ -146,10 +184,48 @@ describe('living repair order next-move projection', () => {
     }).primary).toBeNull()
   })
 
+  it('groups equally ranked job-bound commands instead of choosing a row-order winner', () => {
+    const secondJob = job({ id: '00000000-0000-0000-0000-000000000202', assignedTechId: PROFILE })
+    const first = project({
+      role: 'parts',
+      skillTier: null,
+      jobs: [job({ assignedTechId: PROFILE }), secondJob],
+    })
+    const reversed = project({
+      role: 'parts',
+      skillTier: null,
+      jobs: [secondJob, job({ assignedTechId: PROFILE })],
+    })
+
+    for (const result of [first, reversed]) {
+      expect(result.primary).toBeNull()
+      expect(result.primaryGroup).toMatchObject({
+        label: '2 jobs need attention',
+        commands: expect.arrayContaining([
+          { kind: 'quote', jobId: '00000000-0000-0000-0000-000000000201', label: 'Build ticket' },
+          { kind: 'quote', jobId: '00000000-0000-0000-0000-000000000202', label: 'Build ticket' },
+        ]),
+      })
+      expect(result.secondary).toEqual([])
+    }
+  })
+
+  it('keeps an unequal-rank winner singular and does not group it', () => {
+    const result = project({ role: 'advisor', skillTier: null })
+
+    expect(result.primary).toMatchObject({ kind: 'assign', label: 'Assign work' })
+    expect(result.primaryGroup).toBeNull()
+    expect(result.secondary).toContainEqual(expect.objectContaining({
+      kind: 'quote',
+      label: 'Build ticket',
+    }))
+  })
+
   it('does not offer a new claim after the customer deferred or declined', () => {
     for (const approvalState of ['deferred', 'declined'] as const) {
       expect(project({ jobs: [job({ approvalState })] })).toEqual({
         primary: null,
+        primaryGroup: null,
         secondary: [],
       })
     }
@@ -220,8 +296,8 @@ describe('living repair order next-move projection', () => {
   })
 
   it('does not invent commands for unsupported roles or missing identity', () => {
-    expect(project({ role: 'curator' })).toEqual({ primary: null, secondary: [] })
-    expect(project({ profileId: null })).toEqual({ primary: null, secondary: [] })
+    expect(project({ role: 'curator' })).toEqual({ primary: null, primaryGroup: null, secondary: [] })
+    expect(project({ profileId: null })).toEqual({ primary: null, primaryGroup: null, secondary: [] })
   })
 })
 
