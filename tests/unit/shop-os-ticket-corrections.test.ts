@@ -984,7 +984,7 @@ describe('correctTicket', () => {
         fingerprintKeyVersion: 'link_v1',
         channel: 'link',
         tokenHash: 'b'.repeat(64),
-        tokenExpiresAt: new Date('2026-08-10T12:00:00.000Z'),
+        tokenExpiresAt: new Date(sentAt.getTime() + 7 * 24 * 60 * 60 * 1_000),
         requestingActorProfileId: golden.people.advisor.id,
         requestKey: uuid(722),
         requestFingerprint: 'c'.repeat(64),
