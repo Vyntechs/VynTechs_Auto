@@ -15,6 +15,7 @@ import { canUseManualWork } from '@/lib/shop-os/manual-work-policy'
 import type { TicketDetail, TodayTicketJob } from '@/lib/tickets'
 import type { TicketRingOut } from '@/lib/shop-os/ring-out'
 import type { TicketPartRequestView } from '@/lib/shop-os/part-requests-ui'
+import type { PartsArrivalJobView } from '@/lib/shop-os/parts-arrival-ui'
 import type { CustomerCopyProjection, CustomerCopyResult } from '@/lib/shop-os/customer-copy'
 import type {
   SimpleWorkEscalationView,
@@ -32,6 +33,7 @@ import { TicketCannedJobAction } from './ticket-canned-job-action'
 import { TicketInterruptionAction } from './ticket-interruption-action'
 import { TicketLifecycleControl } from './ticket-lifecycle-control'
 import { TicketPartRequests } from './ticket-part-requests'
+import { TicketPartsArrival } from './ticket-parts-arrival'
 import { InlineWorkWorkspace } from './inline-work-workspace'
 import { CustomerCopy } from './customer-copy'
 import {
@@ -99,6 +101,7 @@ export function TicketDetailScreen({
   team = [],
   ringOut = null,
   partRequests = [],
+  partsArrival = [],
   diagnosticsEntitled = true,
   customerCopy = null,
   refreshCustomerCopyAction,
@@ -115,6 +118,7 @@ export function TicketDetailScreen({
   team?: TeamMember[]
   ringOut?: TicketRingOut | null
   partRequests?: TicketPartRequestView[]
+  partsArrival?: PartsArrivalJobView[]
   diagnosticsEntitled?: boolean
   customerCopy?: CustomerCopyProjection | null
   refreshCustomerCopyAction?: (ticketId: string) => Promise<CustomerCopyResult>
@@ -174,6 +178,7 @@ export function TicketDetailScreen({
     ? emailHref(ticket.customer.email)
     : null
   const activities = ticket.activities ?? []
+  const partsArrivalByJob = new Map(partsArrival.map((job) => [job.jobId, job]))
   const correctedRemovedJobIds = new Set(ticket.correctedRemovedJobIds ?? activities.flatMap((activity) => (
     activity.kind === 'ticket_corrected'
       && activity.correctionScope === 'job_removed'
@@ -789,6 +794,7 @@ export function TicketDetailScreen({
                 'running',
                 'paused',
               ].includes(readiness.state)
+              const partsArrivalJob = partsArrivalByJob.get(job.id)
               return (
                 <li
                   key={job.id}
@@ -910,6 +916,9 @@ export function TicketDetailScreen({
                       role === 'tech',
                     ) : null}
                   </div>
+                  {partsArrivalJob && (
+                    <TicketPartsArrival ticketId={ticket.id} initialJob={partsArrivalJob} />
+                  )}
                   {activeTool?.kind === 'quote'
                     && activeTool.jobId === job.id
                     && currentProfileId && (

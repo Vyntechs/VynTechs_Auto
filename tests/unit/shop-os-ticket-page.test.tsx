@@ -50,6 +50,10 @@ vi.mock('@/lib/shop-os/part-requests', () => ({
   listPartRequestsForTicket: vi.fn(async () => []),
 }))
 
+vi.mock('@/lib/shop-os/parts-arrival', () => ({
+  getPartsArrivalForTicket: vi.fn(async () => ({ ok: true, jobs: [] })),
+}))
+
 vi.mock('@/lib/shop-os/customer-copy', () => ({
   getCustomerCopyBundle: vi.fn(),
 }))
@@ -66,8 +70,8 @@ vi.mock('@/lib/intake/team', () => ({
 }))
 
 vi.mock('@/components/screens/ticket-detail', () => ({
-  TicketDetailScreen: ({ ticket, canBuildQuote, canCorrectTicket, canCreateVendorAccount, canManageCannedJobs, currentProfileId, role, team, diagnosticsEntitled, customerCopy, refreshCustomerCopyAction }: { ticket: TicketDetail; canBuildQuote: boolean; canCorrectTicket?: boolean; canCreateVendorAccount: boolean; canManageCannedJobs: boolean; currentProfileId: string; role: string; team: unknown[]; diagnosticsEntitled: boolean; customerCopy?: { documentKind: string } | null; refreshCustomerCopyAction?: unknown }) => (
-    <div data-canned-library={String(canManageCannedJobs)} data-ticket-correction={String(canCorrectTicket === true)} data-customer-copy={customerCopy?.documentKind ?? 'none'} data-customer-copy-refresh={String(typeof refreshCustomerCopyAction === 'function')}>Ticket screen {ticket.ticketNumber}; quote {String(canBuildQuote)}; vendor setup {String(canCreateVendorAccount)}; actor {currentProfileId}; role {role}; team {team.length}; diagnostics {String(diagnosticsEntitled)}</div>
+  TicketDetailScreen: ({ ticket, canBuildQuote, canCorrectTicket, canCreateVendorAccount, canManageCannedJobs, currentProfileId, role, team, diagnosticsEntitled, customerCopy, refreshCustomerCopyAction, partsArrival }: { ticket: TicketDetail; canBuildQuote: boolean; canCorrectTicket?: boolean; canCreateVendorAccount: boolean; canManageCannedJobs: boolean; currentProfileId: string; role: string; team: unknown[]; diagnosticsEntitled: boolean; customerCopy?: { documentKind: string } | null; refreshCustomerCopyAction?: unknown; partsArrival: unknown[] }) => (
+    <div data-parts-arrival={String(partsArrival.length)} data-canned-library={String(canManageCannedJobs)} data-ticket-correction={String(canCorrectTicket === true)} data-customer-copy={customerCopy?.documentKind ?? 'none'} data-customer-copy-refresh={String(typeof refreshCustomerCopyAction === 'function')}>Ticket screen {ticket.ticketNumber}; quote {String(canBuildQuote)}; vendor setup {String(canCreateVendorAccount)}; actor {currentProfileId}; role {role}; team {team.length}; diagnostics {String(diagnosticsEntitled)}</div>
   ),
 }))
 

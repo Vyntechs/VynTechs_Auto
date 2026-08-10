@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { TicketDetailScreen } from '@/components/screens/ticket-detail'
 import type { TicketDetail } from '@/lib/tickets'
+import type { PartsArrivalJobView } from '@/lib/shop-os/parts-arrival-ui'
 import '@/components/vt/vt.css'
 import {
   IMPLEMENTATION_JOB_ID,
@@ -57,6 +58,8 @@ function proofJob(
 
 function proofTicket(state: string | null): TicketDetail {
   const timestamp = new Date('2026-08-05T14:30:00.000Z')
+  const partsMode = state?.startsWith('parts-') === true
+  const primaryJob = proofJob(IMPLEMENTATION_JOB_ID, 'Front brake service')
   return {
     id: IMPLEMENTATION_TICKET_ID,
     ticketNumber: 1042,
@@ -84,7 +87,11 @@ function proofTicket(state: string | null): TicketDetail {
       plate: 'PROOF42',
     },
     jobs: [
-      proofJob(IMPLEMENTATION_JOB_ID, 'Front brake service'),
+      partsMode ? {
+        ...primaryJob,
+        workStatus: 'blocked',
+        approvalState: 'approved',
+      } : primaryJob,
       ...(state === 'tie'
         ? [proofJob(IMPLEMENTATION_SECOND_JOB_ID, 'Brake fluid service')]
         : state === 'mixed'
@@ -95,6 +102,48 @@ function proofTicket(state: string | null): TicketDetail {
     createdAt: timestamp,
     updatedAt: timestamp,
   }
+}
+
+function proofPartsArrival(role: ProofRole, state: string | null): PartsArrivalJobView[] {
+  if (!state?.startsWith('parts-')) return []
+  const readOnly = role === 'tech'
+  const ordered = { actorName: 'Pat Parts', at: '2026-08-09T19:20:00.000Z' }
+  const received = { actorName: 'Alex Advisor', at: '2026-08-09T19:42:00.000Z' }
+  const allHere = state === 'parts-all'
+  const lines: PartsArrivalJobView['lines'] = [
+    {
+      id: '00000000-0000-4000-8000-000000003101',
+      description: 'Front brake pad set',
+      quantity: '1',
+      partNumber: 'BRF-2147',
+      brand: 'Brembo',
+      state: 'received',
+      nextAction: null,
+      ordered,
+      received,
+    },
+    {
+      id: '00000000-0000-4000-8000-000000003102',
+      description: 'Front brake rotor',
+      quantity: '2',
+      partNumber: 'BRR-8821',
+      brand: 'Brembo',
+      state: allHere ? 'received' : 'ordered',
+      nextAction: allHere || readOnly ? null : 'mark_received',
+      ordered,
+      received: allHere ? received : null,
+    },
+  ]
+  return [{
+    jobId: IMPLEMENTATION_JOB_ID,
+    approvedQuoteVersionId: '00000000-0000-4000-8000-000000003100',
+    title: 'Front brake service',
+    readOnly,
+    receivedCount: allHere ? 2 : 1,
+    totalCount: 2,
+    allHere,
+    lines,
+  }]
 }
 
 function selectedRole(value: string | null): ProofRole {
@@ -122,6 +171,7 @@ export function ImplementationHarness(): React.JSX.Element {
         currentProfileName={role === 'tech' ? 'Toni Technician' : `${role} proof`}
         role={role}
         skillTier={role === 'tech' ? 3 : null}
+        partsArrival={proofPartsArrival(role, state)}
       />
     </div>
   )

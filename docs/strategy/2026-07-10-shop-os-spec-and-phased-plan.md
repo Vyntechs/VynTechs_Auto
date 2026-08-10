@@ -644,6 +644,8 @@ The public approval route is deliberately exempted from authenticated-app middle
 
 **Done when:** push works on supported/allowed devices and degrades cleanly when denied; quote approval reaches the correct recipients once; manual order/receive works without a provider API; changed/unavailable offers block provider placement; sandbox/dry-run proves provider-order idempotency when a transport exists; ticket moves through current derived states to explicit delivery/close without losing legacy history.
 
+**Implementation correction — Parts Arrival begins from approved repair-order lines, 2026-08-09.** The first provider-free order slice does not need the planned `parts_orders` or `parts_order_lines` tables to tell the shop whether an already-approved part still needs ordering, was ordered, or physically arrived. The existing tenant-bound approved `job_lines` status and receipt fields are the narrower source of truth. The candidate mounts this exact-line handoff inside the repair order for parts/advisor/owner and exposes the same truth read-only to the assigned technician. It adds no migration, separate queue, provider refresh, placement, hold release, or work start. Row 41 now owns this exact read/confirm/receive domain; Row 42 remains open until the separate cross-ticket queue exists. [Design](../superpowers/specs/2026-08-09-shop-os-parts-arrival-handoff-design.md) and [execution plan](../superpowers/plans/2026-08-09-shop-os-parts-arrival-handoff.md).
+
 ### Step-to-phase map
 
 | Preflight | Intake | Assign | Command center | Story | Quote | Parts | Approval | Notify/order | Work→delivery |
@@ -773,8 +775,8 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`, `supers
 | 38 | 6 | Schema: push subscriptions, parts orders, order-line mapping | S | 27,31 | pending | — |
 | 39 | 6 | Push routing/server delivery + dedupe | LM | 36,38 | pending | — |
 | 40 | 6 | Push permission/subscription/service-worker UI + fallback | P | 39 | pending | Browser/device support is best-effort |
-| 41 | 6 | Manual order refresh/confirm/receive handlers | LP | 17,28,38 | pending | No provider API required |
-| 42 | 6 | Manual order queue/receive UI | A | 30,41 | pending | — |
+| 41 | 6 | Manual order refresh/confirm/receive handlers | LP | 17,28 | in_progress | Parts Arrival candidate uses exact approved `job_lines`; no provider API or migration. Full gate + PR pending. |
+| 42 | 6 | Manual order queue/receive UI | A | 30,41 | in_progress | Mounted repair-order receive UI is in the Parts Arrival candidate; cross-ticket queue remains pending. |
 | 43 | 6 | Optional API/punchout placement + provider idempotency | LP | 29,41 | blocked | Sandbox or owner approval for real order |
 | 44 | 6 | Derived board/delivery/closeout handlers | LT | 23,36,41 | pending | — |
 | 45 | 6 | Board + delivery/closeout + vehicle-history UI | A | 24,37,42,44 | pending | — |
