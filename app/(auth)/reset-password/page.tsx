@@ -125,7 +125,9 @@ export default function ResetPasswordPage() {
           >
             Pick something at least 8 characters.
           </p>
-          <form onSubmit={setNewPassword} noValidate>
+          {/* Posts rather than GETs for the same reason sign-in does: a submit
+              that beats hydration must not put the new password in the URL. */}
+          <form method="post" onSubmit={setNewPassword} noValidate>
             <div className="field">
               <label htmlFor="new-password">New password</label>
               <input

@@ -227,6 +227,25 @@ Trigger: Cards were painted DARKER than the page, so nothing read as raised and 
 Rule: Give the canvas its own token, one step darker than the surface content sits on, and light the surface.
 Reason: Figure/ground is the cheapest depth in a design system; inverted, no amount of shadow rescues it.
 
+### a-lane-that-nothing-writes-is-dead
+Trigger: The floor board's "Waiting on customer" lane keyed off an approval state no code path ever sets.
+Rule: Before trusting a projection, grep for who WRITES the value, not just who reads it.
+Reason: A read-only enum member renders an empty lane forever and looks like missing data.
+
+### seed-through-doors-routes-actually-call
+Trigger: `addTicketJob` is exported by lib/tickets but no route calls it, so seeding with it invents unreachable state.
+Rule: Map every domain function to its route before seeding; use only the ones a running product reaches.
+Reason: Demo data the product cannot produce teaches the owner to expect screens that will never come.
+
+### borrowed-env-changes-the-product
+Trigger: DIAGNOSTICS_RELEASE=legacy copied from another lane's .env.local made every diagnostic job's work card 404.
+Rule: Build a demo env from what production sets, not from a teammate's file; diff it before blaming code.
+Reason: One inherited flag silently flips an entitlement and turns a working screen into a bare 404.
+
+### hit-test-before-naming-an-overlay-defect
+Trigger: A 30s Playwright click timeout could have been a disabled button, a collapsed disclosure or an overlay.
+Rule: Measure with elementFromPoint at the control's centre and re-test with the overlay removed.
+Reason: Three different causes produce the same timeout, and only one of them is a product defect.
 ### hydration-gap-is-a-real-attack-window
 Trigger: Any form carrying credentials or secrets in a client component.
 Rule: Declare method="post" and disable submit until a mount effect runs. A form with no method GETs every named field into the URL.
