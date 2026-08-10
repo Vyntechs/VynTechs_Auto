@@ -115,7 +115,7 @@
 - [x] Run `pnpm test:shards`, `pnpm exec tsc --noEmit`, production build, and the mounted Playwright suite; this repository has no `verify` script.
 - [x] Confirm no migrations, supplier access, production mutation, dormant feature activation, secrets, debug code, or unrelated changes exist.
 - [x] Update the active roadmap and driver state with exact proof and remaining production gate.
-- [ ] Commit with identical Vyntechs co-author/sign-off trailers and verify them.
-- [ ] Push the branch and open a Buzz-linked PR for channel `95938fc9-02c1-4c1a-8b20-84f540bc6c74`.
+- [x] Commit with identical Vyntechs co-author/sign-off trailers and verify them.
+- [x] Push the branch and open PR #250 with originating Buzz channel `95938fc9-02c1-4c1a-8b20-84f540bc6c74` recorded in its body.
 
 **Verify:** exact HEAD matches every reported check; PR checks are green; production remains unchanged pending exact-version approval.
