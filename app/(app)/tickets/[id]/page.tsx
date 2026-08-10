@@ -14,6 +14,7 @@ import {
 } from '@/lib/shop-os/capabilities'
 import { getCustomerCopyBundle } from '@/lib/shop-os/customer-copy'
 import { listPartRequestsForTicket } from '@/lib/shop-os/part-requests'
+import { getPartsArrivalForTicket } from '@/lib/shop-os/parts-arrival'
 import { isTicketCorrectionEnabled } from '@/lib/release-policy'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { getTicketDetail, ticketActorFromProfile } from '@/lib/tickets'
@@ -63,6 +64,11 @@ export default async function TicketPage({
   const partRequests = canPlacePartsOrders(ctx.profile.role) && ctx.profile.shopId
     ? await listPartRequestsForTicket(db, { shopId: ctx.profile.shopId, ticketId: id })
     : []
+  const partsArrivalResult = await getPartsArrivalForTicket(db, {
+    actor: { profileId: ctx.profile.id },
+    ticketId: id,
+  })
+  const partsArrival = partsArrivalResult.ok ? partsArrivalResult.jobs : []
 
   return (
     <TicketDetailScreen
@@ -84,6 +90,7 @@ export default async function TicketPage({
       team={team}
       ringOut={ringOut}
       partRequests={partRequests}
+      partsArrival={partsArrival}
       diagnosticsEntitled={access.entitlements.diagnostics}
       customerCopy={customerCopy}
       refreshCustomerCopyAction={refreshCustomerCopy}

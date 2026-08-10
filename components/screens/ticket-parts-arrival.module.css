@@ -1,0 +1,217 @@
+.section {
+  min-width: 0;
+  border-top: 1px solid var(--vt-rule);
+  padding-top: 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.heading,
+.lineHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.heading h4 {
+  margin: 3px 0 0;
+  color: var(--vt-fg-1);
+  font: 400 clamp(19px, 2vw, 23px)/1.15 var(--vt-font-serif);
+}
+
+.eyebrow,
+.summary,
+.identity,
+.current,
+.receipts,
+.helper,
+.holdTruth {
+  font-family: var(--vt-font-mono);
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--vt-fg-3);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.summary {
+  flex: 0 0 auto;
+  border: 1px solid var(--vt-rule-strong);
+  border-radius: 999px;
+  padding: 6px 9px;
+  color: var(--vt-fg-2);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: .04em;
+}
+
+.summary[data-all-here] {
+  border-color: var(--vt-signal-600);
+  color: var(--vt-signal-700);
+}
+
+.helper,
+.holdTruth {
+  margin: -5px 0 0;
+  color: var(--vt-fg-3);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.holdTruth {
+  border-left: 2px solid var(--vt-signal-600);
+  padding-left: 10px;
+  color: var(--vt-fg-2);
+}
+
+.lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.line {
+  min-width: 0;
+  border: 1px solid var(--vt-rule);
+  border-radius: var(--vt-radius-2);
+  background: var(--vt-bg);
+  padding: 14px;
+  display: grid;
+  gap: 11px;
+}
+
+.line:focus {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: 3px;
+}
+
+.description {
+  margin: 0;
+  color: var(--vt-fg-1);
+  font: 650 14px/1.35 var(--vt-font-sans);
+  overflow-wrap: anywhere;
+}
+
+.identity {
+  margin: 3px 0 0;
+  color: var(--vt-fg-3);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.current {
+  flex: 0 0 auto;
+  color: var(--vt-signal-700);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.rail {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+}
+
+.stop {
+  position: relative;
+  min-width: 0;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  color: var(--vt-fg-3);
+  font: 600 10px/1.2 var(--vt-font-sans);
+  text-align: center;
+}
+
+.stop::before,
+.stop::after {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  top: 5px;
+  width: 50%;
+  height: 1px;
+  background: var(--vt-rule-strong);
+}
+
+.stop::before { left: 0; }
+.stop::after { right: 0; }
+.stop:first-child::before,
+.stop:last-child::after { display: none; }
+
+.stop i {
+  position: relative;
+  z-index: 1;
+  width: 11px;
+  height: 11px;
+  border: 2px solid var(--vt-rule-strong);
+  border-radius: 50%;
+  background: var(--vt-bg);
+}
+
+.stop[data-state='complete'],
+.stop[data-state='current'] {
+  color: var(--vt-fg-1);
+}
+
+.stop[data-state='complete'] i,
+.stop[data-state='current'] i {
+  border-color: var(--vt-signal-600);
+  background: var(--vt-signal-600);
+}
+
+.stop[data-state='current'] i {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vt-signal-600) 20%, transparent);
+}
+
+.receipts {
+  color: var(--vt-fg-3);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.receipts p { margin: 0; }
+
+.action {
+  min-height: 44px;
+  justify-self: start;
+  border: 1px solid var(--vt-signal-600);
+  border-radius: var(--vt-radius-2);
+  background: transparent;
+  color: var(--vt-signal-700);
+  padding: 0 15px;
+  font: 650 13px/1 var(--vt-font-sans);
+  cursor: pointer;
+}
+
+.action:hover { background: color-mix(in srgb, var(--vt-signal-600) 7%, transparent); }
+.action:disabled { cursor: default; opacity: .55; }
+.action:focus-visible { outline: 2px solid var(--vt-focus-ring); outline-offset: 3px; }
+
+.error {
+  margin: 0;
+  border-left: 3px solid var(--vt-status-declined);
+  background: var(--vt-bg);
+  padding: 10px 12px;
+  color: var(--vt-status-declined);
+  font: 600 11px/1.45 var(--vt-font-mono);
+}
+
+@media (max-width: 520px) {
+  .heading { display: grid; }
+  .summary { justify-self: start; }
+  .lineHeading { gap: 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action { transition: none; }
+}
