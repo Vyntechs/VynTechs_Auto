@@ -3,7 +3,7 @@ function fail(message) {
 }
 
 export function deriveBackupPath(eventName, runId) {
-  if (typeof runId !== 'string' || !/^\d+$/.test(runId)) {
+  if (typeof runId !== 'string' || !/^[1-9]\d*$/.test(runId)) {
     fail('GitHub run identifier is invalid')
   }
 

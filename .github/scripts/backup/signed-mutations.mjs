@@ -53,7 +53,8 @@ export function nativeMutationRequest(operation, body) {
       headers: { 'content-type': CIPHERTEXT_CONTENT_TYPE },
       body,
       duplex: 'half',
+      redirect: 'error',
     }
   }
-  return { method: 'DELETE' }
+  return { method: 'DELETE', redirect: 'error' }
 }

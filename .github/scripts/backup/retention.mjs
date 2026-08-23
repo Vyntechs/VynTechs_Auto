@@ -4,8 +4,8 @@ export const BACKUP_PREFIX = 'database-backups/'
 export const MAX_INVENTORY_ITEMS = 1_000
 export const RETENTION_DAYS = 90
 
-const DAILY_PATH = /^database-backups\/daily\/vyntechs-run-(\d+)\.dump\.age$/
-const MANUAL_PATH = /^database-backups\/manual\/vyntechs-run-(\d+)\.dump\.age$/
+const DAILY_PATH = /^database-backups\/daily\/vyntechs-run-([1-9]\d*)\.dump\.age$/
+const MANUAL_PATH = /^database-backups\/manual\/vyntechs-run-([1-9]\d*)\.dump\.age$/
 
 function fail(message) {
   throw new Error(`encrypted backup retention failed: ${message}`)

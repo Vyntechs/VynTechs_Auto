@@ -124,6 +124,10 @@ describe('encrypted database backup security boundary', () => {
       expect(objectPaths.deriveBackupPath(eventName, '12346')).not.toBe(expectedPath)
     }
     expect(() => objectPaths.deriveBackupPath('push', '12345')).toThrow('not authorized')
+    expect(() => objectPaths.deriveBackupPath('schedule', '012345')).toThrow('invalid')
+    expect(() => retention.parseBackupPath('database-backups/manual/vyntechs-run-02001.dump.age')).toThrow(
+      'outside the backup contract',
+    )
   })
 
   it('uses the locked SDK package for reads and exact signed native mutations without public GitHub sinks', () => {
@@ -144,6 +148,7 @@ describe('encrypted database backup security boundary', () => {
     expect(signedMutationModule).toContain('operations: [operation]')
     expect(signedMutationModule).toContain('allowOverwrite: false')
     expect(signedMutationModule).toContain('addRandomSuffix: false')
+    expect(signedMutationModule).toContain("redirect: 'error'")
     expect(signedMutationModule).toContain("operation === 'delete'")
     expect(backupSources).not.toContain('VERCEL_BLOB_RETRIES')
     expect(workflowSources).not.toMatch(/gh\s+release|upload-artifact|contents:\s*write/i)
@@ -181,7 +186,10 @@ describe('encrypted database backup security boundary', () => {
       cursor: 'page-2',
     })
     expect(mutationFetch).toHaveBeenCalledOnce()
-    expect(mutationFetch).toHaveBeenCalledWith('https://signed.example.test/blob', { method: 'DELETE' })
+    expect(mutationFetch).toHaveBeenCalledWith('https://signed.example.test/blob', {
+      method: 'DELETE',
+      redirect: 'error',
+    })
     expect(client.issueSignedToken).toHaveBeenCalledWith(expect.objectContaining({
       pathname: oldDailyPath,
       operations: ['delete'],
@@ -281,6 +289,7 @@ describe('encrypted database backup security boundary', () => {
         method: 'PUT',
         headers: { 'content-type': 'application/octet-stream' },
         duplex: 'half',
+        redirect: 'error',
       }))
       expect(client.issueSignedToken).toHaveBeenCalledWith(expect.objectContaining({
         pathname: recentDailyPath,
@@ -296,6 +305,26 @@ describe('encrypted database backup security boundary', () => {
         addRandomSuffix: false,
       }))
       expect(client.get).toHaveBeenCalledWith(recentDailyPath, { access: 'private', useCache: false })
+    })
+  })
+
+  it('fails closed on an existing deterministic pathname before signing or mutating', async () => {
+    await withSyntheticArchive(async ({ ciphertextPath, readbackPath }) => {
+      const client = signedMutationClient({
+        head: vi.fn().mockResolvedValue({ pathname: recentDailyPath, etag: 'existing-etag' }),
+      })
+      const mutationFetch = vi.fn()
+
+      await expect(
+        backup.uploadAndVerify(
+          { ciphertextPath, objectPath: recentDailyPath, readbackPath },
+          client,
+          mutationFetch,
+        ),
+      ).rejects.toThrow('pathname already exists')
+      expect(client.issueSignedToken).not.toHaveBeenCalled()
+      expect(client.presignUrl).not.toHaveBeenCalled()
+      expect(mutationFetch).not.toHaveBeenCalled()
     })
   })
 
