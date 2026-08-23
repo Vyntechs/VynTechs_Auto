@@ -1,9 +1,11 @@
+import { issueExactMutationUrl, nativeMutationRequest } from './signed-mutations.mjs'
+
 export const BACKUP_PREFIX = 'database-backups/'
 export const MAX_INVENTORY_ITEMS = 1_000
 export const RETENTION_DAYS = 90
 
-const DAILY_PATH = /^database-backups\/daily\/(\d{4})\/(\d{2})\/vyntechs-(\d{4}-\d{2}-\d{2})\.dump\.age$/
-const MANUAL_PATH = /^database-backups\/manual\/(\d{4})\/(\d{2})\/vyntechs-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})Z-run-([1-9]\d*)\.dump\.age$/
+const DAILY_PATH = /^database-backups\/daily\/vyntechs-run-(\d+)\.dump\.age$/
+const MANUAL_PATH = /^database-backups\/manual\/vyntechs-run-(\d+)\.dump\.age$/
 
 function fail(message) {
   throw new Error(`encrypted backup retention failed: ${message}`)
@@ -13,45 +15,10 @@ function isNotFound(error) {
   return error?.name === 'BlobNotFoundError'
 }
 
-function parseUtcDate(date, time = '00:00:00') {
-  const parsed = new Date(`${date}T${time}Z`)
-  if (Number.isNaN(parsed.getTime())) fail('backup pathname contains an invalid UTC date')
-
-  const [year, month, day] = date.split('-').map(Number)
-  const [hour, minute, second] = time.split(':').map(Number)
-  if (
-    parsed.getUTCFullYear() !== year ||
-    parsed.getUTCMonth() + 1 !== month ||
-    parsed.getUTCDate() !== day ||
-    parsed.getUTCHours() !== hour ||
-    parsed.getUTCMinutes() !== minute ||
-    parsed.getUTCSeconds() !== second
-  ) {
-    fail('backup pathname contains a non-existent UTC date')
-  }
-  return parsed
-}
-
 export function parseBackupPath(pathname) {
   if (typeof pathname !== 'string') fail('backup inventory contains a non-string pathname')
 
-  const daily = pathname.match(DAILY_PATH)
-  if (daily) {
-    const [, directoryYear, directoryMonth, date] = daily
-    if (date.slice(0, 4) !== directoryYear || date.slice(5, 7) !== directoryMonth) {
-      fail('daily backup pathname date does not match its directory')
-    }
-    return { pathname, createdAt: parseUtcDate(date) }
-  }
-
-  const manual = pathname.match(MANUAL_PATH)
-  if (manual) {
-    const [, directoryYear, directoryMonth, date, hour, minute, second] = manual
-    if (date.slice(0, 4) !== directoryYear || date.slice(5, 7) !== directoryMonth) {
-      fail('manual backup pathname date does not match its directory')
-    }
-    return { pathname, createdAt: parseUtcDate(date, `${hour}:${minute}:${second}`) }
-  }
+  if (DAILY_PATH.test(pathname) || MANUAL_PATH.test(pathname)) return { pathname }
 
   fail('backup inventory contains a pathname outside the backup contract')
 }
@@ -82,11 +49,14 @@ export async function collectBackupInventory(client) {
       if (typeof blob.etag !== 'string' || blob.etag.length === 0) {
         fail('backup inventory contains an object without an ETag')
       }
+      if (!(blob.uploadedAt instanceof Date) || Number.isNaN(blob.uploadedAt.getTime())) {
+        fail('backup inventory contains an object without a valid uploadedAt timestamp')
+      }
       if (seenPathnames.has(parsed.pathname)) {
         fail('backup inventory contains a duplicate pathname')
       }
       seenPathnames.add(parsed.pathname)
-      inventory.push({ ...parsed, etag: blob.etag })
+      inventory.push({ ...parsed, etag: blob.etag, uploadedAt: blob.uploadedAt })
     }
 
     if (!page.hasMore) {
@@ -110,32 +80,37 @@ export async function collectBackupInventory(client) {
 export function selectExpiredBackups(inventory, now = new Date()) {
   if (!(now instanceof Date) || Number.isNaN(now.getTime())) fail('retention cutoff was invalid')
   const cutoff = new Date(now.getTime() - RETENTION_DAYS * 24 * 60 * 60 * 1_000)
-  return inventory.filter((backup) => backup.createdAt.getTime() < cutoff.getTime())
+  return inventory.filter((backup) => backup.uploadedAt.getTime() < cutoff.getTime())
 }
 
-export async function reconcileDelete(pathname, etag, client) {
+export async function reconcileDelete(pathname, etag, client, mutationFetch = globalThis.fetch) {
+  let signedUrl
   try {
-    await client.del(pathname, { ifMatch: etag })
-    return
-  } catch (deleteError) {
-    try {
-      await client.head(pathname)
-    } catch (headError) {
-      if (isNotFound(headError)) {
-        return
-      }
-      fail('exact-path deletion readback could not be completed')
-    }
-    void deleteError
-    fail('exact-path deletion outcome remains ambiguous; it will not be retried')
+    signedUrl = await issueExactMutationUrl({ operation: 'delete', pathname, ifMatch: etag }, client)
+  } catch {
+    fail('exact-path deletion could not be prepared')
   }
+
+  try {
+    await mutationFetch(signedUrl, nativeMutationRequest('delete'))
+  } catch {
+    // Exact-path readback below decides whether the one mutation completed.
+  }
+
+  try {
+    await client.head(pathname)
+  } catch (headError) {
+    if (isNotFound(headError)) return
+    fail('exact-path deletion readback could not be completed')
+  }
+  fail('exact-path deletion outcome remains ambiguous; it will not be retried')
 }
 
-export async function retainExpiredBackups(now = new Date(), client) {
+export async function retainExpiredBackups(now = new Date(), client, mutationFetch = globalThis.fetch) {
   const inventory = await collectBackupInventory(client)
   const expired = selectExpiredBackups(inventory, now)
   for (const backup of expired) {
-    await reconcileDelete(backup.pathname, backup.etag, client)
+    await reconcileDelete(backup.pathname, backup.etag, client, mutationFetch)
   }
   return { inventoryCount: inventory.length, deletedCount: expired.length }
 }

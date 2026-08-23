@@ -43,21 +43,10 @@ done < <(printf '%s\n' "$BACKUP_AGE_RECIPIENTS" | tr ',' '\n')
 (( ${#age_recipient_args[@]} > 0 )) || backup_fail 'no usable age recipient was supplied'
 
 readonly event_name=${GITHUB_EVENT_NAME:?GITHUB_EVENT_NAME must be set by GitHub Actions}
-case "$event_name" in
-  schedule)
-    readonly backup_date=$(date -u +%F)
-    readonly object_path="database-backups/daily/${backup_date:0:4}/${backup_date:5:2}/vyntechs-${backup_date}.dump.age"
-    ;;
-  workflow_dispatch)
-    readonly manual_timestamp=$(date -u +%Y-%m-%dT%H-%M-%SZ)
-    readonly run_id=${GITHUB_RUN_ID:?GITHUB_RUN_ID must be set for manual backups}
-    [[ "$run_id" =~ ^[0-9]+$ ]] || backup_fail 'manual backup run identifier is invalid'
-    readonly object_path="database-backups/manual/${manual_timestamp:0:4}/${manual_timestamp:5:2}/vyntechs-${manual_timestamp}-run-${run_id}.dump.age"
-    ;;
-  *)
-    backup_fail 'backup may run only from the schedule or an explicit manual dispatch'
-    ;;
-esac
+readonly run_id=${GITHUB_RUN_ID:?GITHUB_RUN_ID must be set for backups}
+object_path=$(node "$script_dir/object-path.mjs" "$event_name" "$run_id") \
+  || backup_fail 'backup may run only from the schedule or an explicit manual dispatch'
+readonly object_path
 
 # pg_dump writes custom-format bytes only to age's stdin. No plaintext archive
 # is named, stored, uploaded, cached, or emitted by this workflow.

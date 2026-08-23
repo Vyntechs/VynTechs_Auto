@@ -12,10 +12,12 @@ identity, or production restore is created or authorized by this source change.
 - The private Blob store can upload, read, list, and delete ciphertext, but it
   cannot decrypt it. It is deliberately separate from the offline age identity.
 - Scheduled objects use the deterministic private path
-  `database-backups/daily/YYYY/MM/vyntechs-YYYY-MM-DD.dump.age`. Manual objects
-  include the UTC timestamp and GitHub run ID under `database-backups/manual/`.
-- The store retains objects for 90 days. An existing deterministic scheduled
-  path is a failed duplicate, never an overwrite.
+  `database-backups/daily/vyntechs-run-<GITHUB_RUN_ID>.dump.age`. Manual objects
+  use `database-backups/manual/vyntechs-run-<GITHUB_RUN_ID>.dump.age`.
+- The store retains objects for 90 days using the authoritative Blob `uploadedAt`
+  timestamp. An existing deterministic path is a failed duplicate, never an
+  overwrite; GitHub rerun attempts retain the same `GITHUB_RUN_ID` and therefore
+  the same path.
 
 Do not place an age identity, a Blob credential, a database URL, or an object
 URL in GitHub, chat, source control, a shell history, or a ticket.

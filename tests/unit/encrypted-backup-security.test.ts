@@ -17,26 +17,35 @@ const workflow = read('.github', 'workflows', 'daily-db-backup.yml')
 const installAge = read('.github', 'scripts', 'backup', 'install-age.sh')
 const backupShell = read('.github', 'scripts', 'backup', 'backup.sh')
 const backupModule = read('.github', 'scripts', 'backup', 'backup.mjs')
+const objectPathModule = read('.github', 'scripts', 'backup', 'object-path.mjs')
 const retentionModule = read('.github', 'scripts', 'backup', 'retention.mjs')
+const signedMutationModule = read('.github', 'scripts', 'backup', 'signed-mutations.mjs')
 const failureReport = read('.github', 'scripts', 'backup', 'report-failure.sh')
 const backupPackage = JSON.parse(read('.github', 'scripts', 'backup', 'package.json'))
 const backupLock = JSON.parse(read('.github', 'scripts', 'backup', 'package-lock.json'))
 const restore = read('docs', 'RESTORE.md')
 const strategy = read('docs', 'strategy', '2026-07-10-shop-os-spec-and-phased-plan.md')
-const backupSources = [workflow, installAge, backupShell, backupModule, retentionModule, failureReport].join('\n')
+const backupSources = [
+  workflow,
+  installAge,
+  backupShell,
+  backupModule,
+  objectPathModule,
+  retentionModule,
+  signedMutationModule,
+  failureReport,
+].join('\n')
 
 const retention = await import(resolve(root, '.github', 'scripts', 'backup', 'retention.mjs'))
 const backup = await import(resolve(root, '.github', 'scripts', 'backup', 'backup.mjs'))
+const objectPaths = await import(resolve(root, '.github', 'scripts', 'backup', 'object-path.mjs'))
 
-const oldDailyPath = 'database-backups/daily/2026/01/vyntechs-2026-01-01.dump.age'
-const recentDailyPath = 'database-backups/daily/2026/08/vyntechs-2026-08-23.dump.age'
+const oldDailyPath = 'database-backups/daily/vyntechs-run-1001.dump.age'
+const recentDailyPath = 'database-backups/daily/vyntechs-run-1002.dump.age'
+const oldManualPath = 'database-backups/manual/vyntechs-run-2001.dump.age'
 
 function missingBlobError() {
   return Object.assign(new Error('not found'), { name: 'BlobNotFoundError' })
-}
-
-function preconditionError() {
-  return Object.assign(new Error('duplicate'), { name: 'BlobPreconditionFailedError' })
 }
 
 function privateReadback(ciphertext: Buffer, pathname: string, etag: string) {
@@ -44,6 +53,36 @@ function privateReadback(ciphertext: Buffer, pathname: string, etag: string) {
     statusCode: 200,
     stream: Readable.toWeb(Readable.from([ciphertext])),
     blob: { pathname, etag },
+  }
+}
+
+type SignedMutationClient = {
+  issueSignedToken: ReturnType<typeof vi.fn>
+  presignUrl: ReturnType<typeof vi.fn>
+  head: ReturnType<typeof vi.fn>
+  get: ReturnType<typeof vi.fn>
+  list: ReturnType<typeof vi.fn>
+}
+
+function signedMutationClient(overrides: Partial<SignedMutationClient> = {}): SignedMutationClient {
+  return {
+    issueSignedToken: vi.fn().mockResolvedValue({
+      delegationToken: 'delegation-token',
+      clientSigningToken: 'client-signing-token',
+      validUntil: Date.now() + 60_000,
+    }),
+    presignUrl: vi.fn().mockResolvedValue({ presignedUrl: 'https://signed.example.test/blob' }),
+    head: vi.fn(),
+    get: vi.fn(),
+    list: vi.fn(),
+    ...overrides,
+  }
+}
+
+function successfulPut(pathname: string, etag: string) {
+  return {
+    ok: true,
+    json: vi.fn().mockResolvedValue({ pathname, etag }),
   }
 }
 
@@ -63,17 +102,31 @@ async function withSyntheticArchive(
 }
 
 describe('encrypted database backup security boundary', () => {
-  it('streams a custom PostgreSQL archive to age before any storage call and pins its release', () => {
+  it('streams a custom PostgreSQL archive to age before any storage call and derives stable invocation keys', () => {
     expect(backupShell).toMatch(/pg_dump_binary[\s\S]*--format=custom[\s\S]*\|\s*"\$age_binary" --encrypt/)
     expect(backupShell).toContain('--compress=zstd:9')
     expect(backupShell).toContain('database.dump.age')
     expect(installAge).toContain('age-v${AGE_VERSION}-linux-amd64.tar.gz')
     expect(installAge).toContain('bdc69c09cbdd6cf8b1f333d372a1f58247b3a33146406333e30c0f26e8f51377')
     expect(installAge).toContain("readonly AGE_VERSION='1.3.1'")
-    expect(backupShell).toContain('node "$script_dir/backup.mjs"')
+    expect(backupShell).toContain('node "$script_dir/object-path.mjs"')
+    expect(backupShell).not.toContain('date -u')
+    expect(restore).toContain('database-backups/daily/vyntechs-run-<GITHUB_RUN_ID>.dump.age')
+    expect(restore).toContain('database-backups/manual/vyntechs-run-<GITHUB_RUN_ID>.dump.age')
+    expect(restore).toContain('Blob `uploadedAt`')
+
+    for (const [eventName, expectedPath] of [
+      ['schedule', 'database-backups/daily/vyntechs-run-12345.dump.age'],
+      ['workflow_dispatch', 'database-backups/manual/vyntechs-run-12345.dump.age'],
+    ] as const) {
+      expect(objectPaths.deriveBackupPath(eventName, '12345')).toBe(expectedPath)
+      expect(objectPaths.deriveBackupPath(eventName, '12345')).toBe(expectedPath)
+      expect(objectPaths.deriveBackupPath(eventName, '12346')).not.toBe(expectedPath)
+    }
+    expect(() => objectPaths.deriveBackupPath('push', '12345')).toThrow('not authorized')
   })
 
-  it('uses the locked SDK package and excludes public GitHub sinks and write permissions', () => {
+  it('uses the locked SDK package for reads and exact signed native mutations without public GitHub sinks', () => {
     expect(backupPackage.dependencies['@vercel/blob']).toBe('2.8.0')
     expect(backupLock.packages['node_modules/@vercel/blob'].version).toBe('2.8.0')
     expect(backupLock.packages['node_modules/@vercel/blob'].integrity).toBe(
@@ -82,33 +135,39 @@ describe('encrypted database backup security boundary', () => {
     expect(workflow).toContain('npm ci --ignore-scripts --omit=dev --prefix .github/scripts/backup')
     expect(workflow).toMatch(/permissions:\s*\n\s*contents: read/)
     expect(workflow).toMatch(/concurrency:\s*\n\s*group: encrypted-database-backup\s*\n\s*cancel-in-progress: false/)
-    expect(backupModule).toContain("access: 'private'")
-    expect(backupModule).toContain('addRandomSuffix: false')
-    expect(backupModule).toContain('allowOverwrite: false')
     expect(backupModule).toContain('createRequire(import.meta.url)')
     expect(backupModule).not.toMatch(/^\s*import\s+.*['"]@vercel\/blob['"]/m)
     expect(retentionModule).not.toMatch(/^\s*import\s+.*['"]@vercel\/blob['"]/m)
+    expect(backupModule).not.toMatch(/client\.put|client\.del/)
+    expect(retentionModule).not.toMatch(/client\.put|client\.del/)
+    expect(signedMutationModule).toContain("access: 'private'")
+    expect(signedMutationModule).toContain('operations: [operation]')
+    expect(signedMutationModule).toContain('allowOverwrite: false')
+    expect(signedMutationModule).toContain('addRandomSuffix: false')
+    expect(signedMutationModule).toContain("operation === 'delete'")
+    expect(backupSources).not.toContain('VERCEL_BLOB_RETRIES')
     expect(workflowSources).not.toMatch(/gh\s+release|upload-artifact|contents:\s*write/i)
     expect(backupSources).not.toMatch(/\.sql\.gz|gzip|gh\s+release|upload-artifact/i)
   })
 
-  it('traverses every retention page before conditionally deleting only expired exact paths', async () => {
+  it('traverses every retention page and deletes only uploadedAt-expired exact paths with one signed request', async () => {
     const list = vi
       .fn()
       .mockResolvedValueOnce({
-        blobs: [{ pathname: oldDailyPath, etag: 'etag-old' }],
+        blobs: [{ pathname: oldDailyPath, etag: 'etag-old', uploadedAt: new Date('2026-05-01T00:00:00Z') }],
         hasMore: true,
         cursor: 'page-2',
       })
       .mockResolvedValueOnce({
-        blobs: [{ pathname: recentDailyPath, etag: 'etag-recent' }],
+        blobs: [{ pathname: recentDailyPath, etag: 'etag-recent', uploadedAt: new Date('2026-08-23T00:00:00Z') }],
         hasMore: false,
       })
-    const del = vi.fn().mockResolvedValue(undefined)
     const head = vi.fn().mockRejectedValue(missingBlobError())
+    const client = signedMutationClient({ list, head })
+    const mutationFetch = vi.fn().mockResolvedValue({ ok: true })
 
     await expect(
-      retention.retainExpiredBackups(new Date('2026-08-23T07:00:00Z'), { list, del, head }),
+      retention.retainExpiredBackups(new Date('2026-08-23T07:00:00Z'), client, mutationFetch),
     ).resolves.toEqual({ inventoryCount: 2, deletedCount: 1 })
     expect(list).toHaveBeenNthCalledWith(1, {
       prefix: 'database-backups/',
@@ -121,16 +180,29 @@ describe('encrypted database backup security boundary', () => {
       mode: 'expanded',
       cursor: 'page-2',
     })
-    expect(del).toHaveBeenCalledOnce()
-    expect(del).toHaveBeenCalledWith(oldDailyPath, { ifMatch: 'etag-old' })
+    expect(mutationFetch).toHaveBeenCalledOnce()
+    expect(mutationFetch).toHaveBeenCalledWith('https://signed.example.test/blob', { method: 'DELETE' })
+    expect(client.issueSignedToken).toHaveBeenCalledWith(expect.objectContaining({
+      pathname: oldDailyPath,
+      operations: ['delete'],
+    }))
+    expect(client.presignUrl).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({
+      access: 'private',
+      pathname: oldDailyPath,
+      operation: 'delete',
+      ifMatch: 'etag-old',
+    }))
+    expect(head).toHaveBeenCalledOnce()
   })
 
-  it('halts unsafe retention inventories before any deletion', async () => {
-    const noDelete = vi.fn()
+  it('halts malformed retention inventory before any deletion', async () => {
+    const mutationFetch = vi.fn()
+    const noDeleteClient = () => signedMutationClient({ head: vi.fn() })
+
     await expect(
       retention.collectBackupInventory({
         list: vi.fn().mockResolvedValue({
-          blobs: [{ pathname: oldDailyPath, etag: 'etag-old' }],
+          blobs: [{ pathname: oldDailyPath, etag: 'etag-old', uploadedAt: new Date('2026-01-01T00:00:00Z') }],
           hasMore: true,
         }),
       }),
@@ -139,188 +211,195 @@ describe('encrypted database backup security boundary', () => {
     const repeatedCursorList = vi
       .fn()
       .mockResolvedValueOnce({
-        blobs: [{ pathname: oldDailyPath, etag: 'etag-old' }],
+        blobs: [{ pathname: oldDailyPath, etag: 'etag-old', uploadedAt: new Date('2026-01-01T00:00:00Z') }],
         hasMore: true,
         cursor: 'next',
       })
       .mockResolvedValueOnce({
-        blobs: [{ pathname: recentDailyPath, etag: 'etag-recent' }],
+        blobs: [{ pathname: recentDailyPath, etag: 'etag-recent', uploadedAt: new Date('2026-08-01T00:00:00Z') }],
         hasMore: true,
         cursor: 'next',
       })
     await expect(
-      retention.retainExpiredBackups(new Date('2026-08-23T07:00:00Z'), {
-        list: repeatedCursorList,
-        del: noDelete,
-        head: vi.fn(),
-      }),
+      retention.retainExpiredBackups(new Date('2026-08-23T07:00:00Z'), { ...noDeleteClient(), list: repeatedCursorList }, mutationFetch),
     ).rejects.toThrow('repeated a cursor')
 
     for (const [description, blobs, message] of [
-      ['duplicate pathnames', [{ pathname: oldDailyPath, etag: 'a' }, { pathname: oldDailyPath, etag: 'b' }], 'duplicate pathname'],
-      ['malformed pathnames', [{ pathname: 'database-backups/untrusted.dump.age', etag: 'a' }], 'outside the backup contract'],
-      ['missing ETags', [{ pathname: oldDailyPath }], 'without an ETag'],
+      ['duplicate pathnames', [
+        { pathname: oldDailyPath, etag: 'a', uploadedAt: new Date('2026-01-01T00:00:00Z') },
+        { pathname: oldDailyPath, etag: 'b', uploadedAt: new Date('2026-01-02T00:00:00Z') },
+      ], 'duplicate pathname'],
+      ['malformed pathnames', [{ pathname: 'database-backups/untrusted.dump.age', etag: 'a', uploadedAt: new Date() }], 'outside the backup contract'],
+      ['missing ETags', [{ pathname: oldDailyPath, uploadedAt: new Date() }], 'without an ETag'],
+      ['missing uploadedAt', [{ pathname: oldDailyPath, etag: 'a' }], 'without a valid uploadedAt'],
       ['inventories over the cap', Array.from({ length: 1_001 }, () => ({})), '1,000-object safety cap'],
     ] as const) {
       await expect(
         retention.retainExpiredBackups(new Date('2026-08-23T07:00:00Z'), {
+          ...noDeleteClient(),
           list: vi.fn().mockResolvedValue({ blobs, hasMore: false }),
-          del: noDelete,
-          head: vi.fn(),
-        }),
+        }, mutationFetch),
       ).rejects.toThrow(message)
-      expect(noDelete, description).not.toHaveBeenCalled()
+      expect(mutationFetch, description).not.toHaveBeenCalled()
     }
   })
 
-  it('reconciles one ambiguous exact-path retention deletion but stops when the object remains', async () => {
-    const list = vi.fn().mockResolvedValue({
-      blobs: [{ pathname: oldDailyPath, etag: 'etag-old' }],
-      hasMore: false,
+  it('makes one conditional retention delete and stops when a changed-ETag object remains', async () => {
+    const client = signedMutationClient({
+      head: vi.fn().mockResolvedValue({ pathname: oldManualPath, etag: 'competitor-etag' }),
     })
-    const del = vi.fn().mockRejectedValue(new Error('ambiguous transport result'))
-    const head = vi.fn().mockRejectedValue(missingBlobError())
+    const mutationFetch = vi.fn().mockRejectedValue(new Error('transport interrupted'))
 
     await expect(
-      retention.retainExpiredBackups(new Date('2026-08-23T07:00:00Z'), { list, del, head }),
-    ).resolves.toEqual({ inventoryCount: 1, deletedCount: 1 })
-    expect(del).toHaveBeenCalledTimes(1)
-    expect(del).toHaveBeenCalledWith(oldDailyPath, { ifMatch: 'etag-old' })
-    expect(head).toHaveBeenCalledWith(oldDailyPath)
-
-    const presentDel = vi.fn().mockRejectedValue(new Error('ambiguous transport result'))
-    const presentHead = vi.fn().mockResolvedValue({ pathname: oldDailyPath, etag: 'etag-old' })
-    await expect(
-      retention.reconcileDelete(oldDailyPath, 'etag-old', { del: presentDel, head: presentHead }),
+      retention.reconcileDelete(oldManualPath, 'owned-etag', client, mutationFetch),
     ).rejects.toThrow('outcome remains ambiguous')
-    expect(presentDel).toHaveBeenCalledOnce()
-    expect(presentHead).toHaveBeenCalledOnce()
+    expect(mutationFetch).toHaveBeenCalledOnce()
+    expect(client.head).toHaveBeenCalledOnce()
+    expect(client.presignUrl).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({
+      operation: 'delete',
+      pathname: oldManualPath,
+      ifMatch: 'owned-etag',
+    }))
   })
 
-  it('uses private immutable upload and verifies matching upload and readback object metadata', async () => {
+  it('uses one private immutable signed PUT and verifies matching upload and readback metadata', async () => {
     await withSyntheticArchive(async ({ ciphertext, ciphertextPath, readbackPath }) => {
-      const put = vi.fn(async (pathname, body, options) => {
-        for await (const _chunk of body) {
-          // Consume the synthetic stream so the mocked upload has the same shape as the SDK call.
-        }
-        expect(pathname).toBe(recentDailyPath)
-        expect(options).toMatchObject({
-          access: 'private',
-          addRandomSuffix: false,
-          allowOverwrite: false,
-          multipart: false,
-        })
-        return { pathname, etag: 'etag-upload' }
+      const client = signedMutationClient({
+        head: vi.fn().mockRejectedValue(missingBlobError()),
+        get: vi.fn().mockResolvedValue(privateReadback(ciphertext, recentDailyPath, 'etag-upload')),
       })
-      const get = vi.fn().mockResolvedValue(privateReadback(ciphertext, recentDailyPath, 'etag-upload'))
-      const head = vi.fn().mockRejectedValue(missingBlobError())
-      const del = vi.fn()
+      const mutationFetch = vi.fn().mockResolvedValue(successfulPut(recentDailyPath, 'etag-upload'))
 
       await backup.uploadAndVerify(
         { ciphertextPath, objectPath: recentDailyPath, readbackPath },
-        { put, get, head, del },
+        client,
+        mutationFetch,
       )
       await expect(readFile(readbackPath)).resolves.toEqual(ciphertext)
-      expect(get).toHaveBeenCalledWith(recentDailyPath, { access: 'private', useCache: false })
-      expect(del).not.toHaveBeenCalled()
+      expect(mutationFetch).toHaveBeenCalledOnce()
+      expect(mutationFetch).toHaveBeenCalledWith('https://signed.example.test/blob', expect.objectContaining({
+        method: 'PUT',
+        headers: { 'content-type': 'application/octet-stream' },
+        duplex: 'half',
+      }))
+      expect(client.issueSignedToken).toHaveBeenCalledWith(expect.objectContaining({
+        pathname: recentDailyPath,
+        operations: ['put'],
+        allowedContentTypes: ['application/octet-stream'],
+        maximumSizeInBytes: ciphertext.length,
+      }))
+      expect(client.presignUrl).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({
+        access: 'private',
+        pathname: recentDailyPath,
+        operation: 'put',
+        allowOverwrite: false,
+        addRandomSuffix: false,
+      }))
+      expect(client.get).toHaveBeenCalledWith(recentDailyPath, { access: 'private', useCache: false })
     })
   })
 
-  it('conditionally cleans up its own uploaded object when readback verification fails', async () => {
+  it('reconciles exactly once after commit/lost-response, precondition, and malformed PUT outcomes', async () => {
+    await withSyntheticArchive(async ({ ciphertext, ciphertextPath, readbackPath }) => {
+      const runReconciliation = async (mutationFetch: ReturnType<typeof vi.fn>, suffix: string) => {
+        const client = signedMutationClient({
+          head: vi
+            .fn()
+            .mockRejectedValueOnce(missingBlobError())
+            .mockResolvedValueOnce({ pathname: recentDailyPath, etag: 'etag-reconciled' }),
+          get: vi.fn().mockResolvedValue(privateReadback(ciphertext, recentDailyPath, 'etag-reconciled')),
+        })
+        await expect(
+          backup.uploadAndVerify(
+            { ciphertextPath, objectPath: recentDailyPath, readbackPath: `${readbackPath}-${suffix}` },
+            client,
+            mutationFetch,
+          ),
+        ).resolves.toBeUndefined()
+        expect(mutationFetch).toHaveBeenCalledOnce()
+        expect(client.head).toHaveBeenCalledTimes(2)
+        expect(client.get).toHaveBeenCalledOnce()
+      }
+
+      await runReconciliation(vi.fn().mockRejectedValue(new Error('lost response')), 'lost')
+      await runReconciliation(vi.fn().mockResolvedValue({ ok: false, status: 412 }), 'precondition')
+      await runReconciliation(
+        vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({ pathname: recentDailyPath }) }),
+        'malformed',
+      )
+    })
+  })
+
+  it('cleans up only its well-formed ETag-owned upload after readback failure', async () => {
     await withSyntheticArchive(async ({ ciphertextPath, readbackPath }) => {
-      const put = vi.fn().mockResolvedValue({ pathname: recentDailyPath, etag: 'etag-upload' })
-      const get = vi
+      const client = signedMutationClient({
+        head: vi.fn().mockRejectedValue(missingBlobError()),
+        get: vi.fn().mockResolvedValue(privateReadback(Buffer.from('different ciphertext'), recentDailyPath, 'etag-upload')),
+      })
+      const mutationFetch = vi
         .fn()
-        .mockResolvedValue(privateReadback(Buffer.from('different synthetic ciphertext'), recentDailyPath, 'etag-upload'))
-      const head = vi.fn().mockRejectedValue(missingBlobError())
-      const del = vi.fn().mockResolvedValue(undefined)
+        .mockResolvedValueOnce(successfulPut(recentDailyPath, 'etag-upload'))
+        .mockResolvedValueOnce({ ok: true })
 
       await expect(
         backup.uploadAndVerify(
           { ciphertextPath, objectPath: recentDailyPath, readbackPath },
-          { put, get, head, del },
+          client,
+          mutationFetch,
         ),
       ).rejects.toThrow('checksum did not match')
-      expect(del).toHaveBeenCalledOnce()
-      expect(del).toHaveBeenCalledWith(recentDailyPath, { ifMatch: 'etag-upload' })
-      expect(head).toHaveBeenCalledTimes(2)
+      expect(mutationFetch).toHaveBeenCalledTimes(2)
+      expect(client.head).toHaveBeenCalledTimes(2)
+      expect(client.presignUrl).toHaveBeenLastCalledWith(expect.any(Object), expect.objectContaining({
+        operation: 'delete',
+        pathname: recentDailyPath,
+        ifMatch: 'etag-upload',
+      }))
 
-      const unreadablePut = vi.fn().mockResolvedValue({ pathname: recentDailyPath, etag: 'etag-unreadable' })
-      const unreadableHead = vi.fn().mockRejectedValue(missingBlobError())
-      const unreadableDel = vi.fn().mockResolvedValue(undefined)
-      await expect(
-        backup.uploadAndVerify(
-          { ciphertextPath, objectPath: recentDailyPath, readbackPath: `${readbackPath}.unreadable` },
-          {
-            put: unreadablePut,
-            get: vi.fn().mockRejectedValue(new Error('provider locator must not escape')),
-            head: unreadableHead,
-            del: unreadableDel,
-          },
-        ),
-      ).rejects.toThrow('readback could not be completed')
-      expect(unreadableDel).toHaveBeenCalledWith(recentDailyPath, { ifMatch: 'etag-unreadable' })
-      expect(unreadableHead).toHaveBeenCalledTimes(2)
-    })
-  })
-
-  it('never deletes after an ambiguous put and accepts only an exact encrypted readback reconciliation', async () => {
-    await withSyntheticArchive(async ({ ciphertext, ciphertextPath, readbackPath }) => {
-      const put = vi.fn().mockRejectedValue(new Error('transport interrupted'))
-      const head = vi
+      const changedEtagClient = signedMutationClient({
+        head: vi
+          .fn()
+          .mockRejectedValueOnce(missingBlobError())
+          .mockResolvedValueOnce({ pathname: recentDailyPath, etag: 'competitor-etag' }),
+        get: vi.fn().mockResolvedValue(privateReadback(Buffer.from('different ciphertext'), recentDailyPath, 'etag-upload')),
+      })
+      const changedEtagFetch = vi
         .fn()
-        .mockRejectedValueOnce(missingBlobError())
-        .mockResolvedValueOnce({ pathname: recentDailyPath, etag: 'etag-reconciled' })
-      const get = vi.fn().mockResolvedValue(privateReadback(ciphertext, recentDailyPath, 'etag-reconciled'))
-      const del = vi.fn()
-
+        .mockResolvedValueOnce(successfulPut(recentDailyPath, 'etag-upload'))
+        .mockResolvedValueOnce({ ok: false, status: 412 })
       await expect(
         backup.uploadAndVerify(
-          { ciphertextPath, objectPath: recentDailyPath, readbackPath },
-          { put, get, head, del },
+          { ciphertextPath, objectPath: recentDailyPath, readbackPath: `${readbackPath}.competitor` },
+          changedEtagClient,
+          changedEtagFetch,
         ),
-      ).resolves.toBeUndefined()
-      expect(put).toHaveBeenCalledOnce()
-      expect(head).toHaveBeenCalledTimes(2)
-      expect(del).not.toHaveBeenCalled()
+      ).rejects.toThrow('cleanup outcome remains unknown')
+      expect(changedEtagFetch).toHaveBeenCalledTimes(2)
+      expect(changedEtagClient.head).toHaveBeenCalledTimes(2)
     })
   })
 
-  it('classifies put conflicts as duplicates and stops unknown put outcomes without deletion', async () => {
+  it('stops unknown precondition reconciliation without deleting a competing object', async () => {
     await withSyntheticArchive(async ({ ciphertextPath, readbackPath }) => {
-      const conflictPut = vi.fn().mockRejectedValue(preconditionError())
-      const conflictHead = vi.fn().mockRejectedValue(missingBlobError())
-      const conflictDel = vi.fn()
+      const client = signedMutationClient({
+        head: vi
+          .fn()
+          .mockRejectedValueOnce(missingBlobError())
+          .mockResolvedValueOnce({ pathname: recentDailyPath, etag: 'competitor-etag' }),
+        get: vi.fn().mockResolvedValue(privateReadback(Buffer.from('different ciphertext'), recentDailyPath, 'competitor-etag')),
+      })
+      const mutationFetch = vi.fn().mockResolvedValue({ ok: false, status: 412 })
 
       await expect(
         backup.uploadAndVerify(
           { ciphertextPath, objectPath: recentDailyPath, readbackPath },
-          { put: conflictPut, get: vi.fn(), head: conflictHead, del: conflictDel },
-        ),
-      ).rejects.toThrow('pathname already exists')
-      expect(conflictHead).toHaveBeenCalledOnce()
-      expect(conflictDel).not.toHaveBeenCalled()
-
-      const unknownPut = vi.fn().mockRejectedValue(new Error('transport interrupted'))
-      const unknownHead = vi
-        .fn()
-        .mockRejectedValueOnce(missingBlobError())
-        .mockResolvedValueOnce({ pathname: recentDailyPath, etag: 'etag-unknown' })
-      const unknownDel = vi.fn()
-      await expect(
-        backup.uploadAndVerify(
-          { ciphertextPath, objectPath: recentDailyPath, readbackPath: `${readbackPath}.unknown` },
-          {
-            put: unknownPut,
-            get: vi.fn().mockResolvedValue(privateReadback(Buffer.from('different ciphertext'), recentDailyPath, 'etag-unknown')),
-            head: unknownHead,
-            del: unknownDel,
-          },
+          client,
+          mutationFetch,
         ),
       ).rejects.toThrow('outcome is unknown')
-      expect(unknownPut).toHaveBeenCalledOnce()
-      expect(unknownHead).toHaveBeenCalledTimes(2)
-      expect(unknownDel).not.toHaveBeenCalled()
+      expect(mutationFetch).toHaveBeenCalledOnce()
+      expect(client.head).toHaveBeenCalledTimes(2)
+      expect(client.issueSignedToken).toHaveBeenCalledOnce()
     })
   })
 

@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
-import { access } from 'node:fs/promises'
+import { access, stat } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { Readable } from 'node:stream'
 import { finished, pipeline } from 'node:stream/promises'
 import { parseBackupPath, retainExpiredBackups } from './retention.mjs'
+import { issueExactMutationUrl, nativeMutationRequest } from './signed-mutations.mjs'
 
 const requireFromBackupRuntime = createRequire(import.meta.url)
 
@@ -16,16 +17,23 @@ function isNotFound(error) {
   return error?.name === 'BlobNotFoundError'
 }
 
-function isPreconditionFailure(error) {
-  return error?.name === 'BlobPreconditionFailedError'
-}
-
 async function sha256File(pathname) {
   const hash = createHash('sha256')
   const input = createReadStream(pathname)
   input.on('data', (chunk) => hash.update(chunk))
   await finished(input)
   return hash.digest('hex')
+}
+
+async function ciphertextByteLength(pathname) {
+  try {
+    const metadata = await stat(pathname)
+    if (!metadata.isFile() || metadata.size < 1) fail('encrypted archive is unavailable')
+    return metadata.size
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('encrypted backup failed:')) throw error
+    fail('encrypted archive is unavailable')
+  }
 }
 
 async function assertPathnameAbsent(pathname, client) {
@@ -71,9 +79,16 @@ async function readbackAndVerify({ ciphertextPath, objectPath, readbackPath, eta
   if (localHash !== readbackHash) fail('encrypted readback checksum did not match the uploaded archive')
 }
 
-async function cleanupOwnedUpload(pathname, etag, client) {
+async function cleanupOwnedUpload(pathname, etag, client, mutationFetch) {
+  let signedUrl
   try {
-    await client.del(pathname, { ifMatch: etag })
+    signedUrl = await issueExactMutationUrl({ operation: 'delete', pathname, ifMatch: etag }, client)
+  } catch {
+    fail('encrypted upload cleanup could not be prepared')
+  }
+
+  try {
+    await mutationFetch(signedUrl, nativeMutationRequest('delete'))
   } catch {
     // Reconcile exactly once below. Never retry a conditionally-owned deletion.
   }
@@ -108,35 +123,53 @@ async function reconcileAmbiguousPut({ ciphertextPath, objectPath, readbackPath 
 export async function uploadAndVerify(
   { ciphertextPath, objectPath, readbackPath },
   client,
+  mutationFetch = globalThis.fetch,
 ) {
   parseBackupPath(objectPath)
   await access(ciphertextPath)
+  const maximumSizeInBytes = await ciphertextByteLength(ciphertextPath)
   await assertPathnameAbsent(objectPath, client)
 
-  let uploaded
+  let signedUrl
   try {
-    uploaded = await client.put(objectPath, createReadStream(ciphertextPath), {
-      access: 'private',
-      addRandomSuffix: false,
-      allowOverwrite: false,
-      contentType: 'application/octet-stream',
-      multipart: false,
-    })
-  } catch (error) {
-    if (isPreconditionFailure(error)) fail('the deterministic private Blob pathname already exists')
+    signedUrl = await issueExactMutationUrl(
+      { operation: 'put', pathname: objectPath, maximumSizeInBytes },
+      client,
+    )
+  } catch {
+    fail('private encrypted upload could not be prepared')
+  }
+
+  let response
+  try {
+    response = await mutationFetch(
+      signedUrl,
+      nativeMutationRequest('put', createReadStream(ciphertextPath)),
+    )
+  } catch {
     await reconcileAmbiguousPut({ ciphertextPath, objectPath, readbackPath }, client)
     return
   }
 
-  if (!uploaded || uploaded.pathname !== objectPath || typeof uploaded.etag !== 'string' || uploaded.etag.length === 0) {
-    fail('private encrypted upload outcome is unknown')
+  let uploaded
+  try {
+    const result = response?.ok ? await response.json() : undefined
+    if (result?.pathname === objectPath && typeof result.etag === 'string' && result.etag.length > 0) {
+      uploaded = { pathname: result.pathname, etag: result.etag }
+    }
+  } catch {
+    // A malformed success is reconciled exactly once below.
+  }
+  if (!uploaded) {
+    await reconcileAmbiguousPut({ ciphertextPath, objectPath, readbackPath }, client)
+    return
   }
 
   try {
     await readbackAndVerify({ ciphertextPath, objectPath, readbackPath, etag: uploaded.etag }, client)
   } catch (error) {
     try {
-      await cleanupOwnedUpload(objectPath, uploaded.etag, client)
+      await cleanupOwnedUpload(objectPath, uploaded.etag, client, mutationFetch)
     } catch {
       fail('encrypted upload verification failed and cleanup outcome remains unknown')
     }
@@ -146,8 +179,8 @@ export async function uploadAndVerify(
 
 async function loadBlobClient() {
   try {
-    const { del, get, head, list, put } = requireFromBackupRuntime('@vercel/blob')
-    return { del, get, head, list, put }
+    const { get, head, issueSignedToken, list, presignUrl } = requireFromBackupRuntime('@vercel/blob')
+    return { get, head, issueSignedToken, list, presignUrl }
   } catch {
     fail('isolated private Blob tooling is unavailable')
   }
