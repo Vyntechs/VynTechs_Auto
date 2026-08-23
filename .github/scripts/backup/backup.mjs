@@ -1,21 +1,23 @@
 import { createHash } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { access } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { Readable } from 'node:stream'
 import { finished, pipeline } from 'node:stream/promises'
-import { BlobNotFoundError, BlobPreconditionFailedError, del, get, head, put } from '@vercel/blob'
 import { parseBackupPath, retainExpiredBackups } from './retention.mjs'
+
+const requireFromBackupRuntime = createRequire(import.meta.url)
 
 function fail(message) {
   throw new Error(`encrypted backup failed: ${message}`)
 }
 
 function isNotFound(error) {
-  return error instanceof BlobNotFoundError || error?.name === 'BlobNotFoundError'
+  return error?.name === 'BlobNotFoundError'
 }
 
 function isPreconditionFailure(error) {
-  return error instanceof BlobPreconditionFailedError || error?.name === 'BlobPreconditionFailedError'
+  return error?.name === 'BlobPreconditionFailedError'
 }
 
 async function sha256File(pathname) {
@@ -26,7 +28,7 @@ async function sha256File(pathname) {
   return hash.digest('hex')
 }
 
-async function assertPathnameAbsent(pathname, client = { head }) {
+async function assertPathnameAbsent(pathname, client) {
   try {
     await client.head(pathname)
   } catch (error) {
@@ -105,7 +107,7 @@ async function reconcileAmbiguousPut({ ciphertextPath, objectPath, readbackPath 
 
 export async function uploadAndVerify(
   { ciphertextPath, objectPath, readbackPath },
-  client = { put, get, head, del },
+  client,
 ) {
   parseBackupPath(objectPath)
   await access(ciphertextPath)
@@ -142,6 +144,15 @@ export async function uploadAndVerify(
   }
 }
 
+async function loadBlobClient() {
+  try {
+    const { del, get, head, list, put } = requireFromBackupRuntime('@vercel/blob')
+    return { del, get, head, list, put }
+  } catch {
+    fail('isolated private Blob tooling is unavailable')
+  }
+}
+
 async function main() {
   const [ciphertextPath, objectPath, readbackPath] = process.argv.slice(2)
   if (!ciphertextPath || !objectPath || !readbackPath || process.argv.length !== 5) {
@@ -149,8 +160,9 @@ async function main() {
   }
   if (!process.env.BLOB_READ_WRITE_TOKEN) fail('private Blob credential is not configured')
 
-  await uploadAndVerify({ ciphertextPath, objectPath, readbackPath })
-  await retainExpiredBackups()
+  const client = await loadBlobClient()
+  await uploadAndVerify({ ciphertextPath, objectPath, readbackPath }, client)
+  await retainExpiredBackups(new Date(), client)
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

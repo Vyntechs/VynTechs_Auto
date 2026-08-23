@@ -1,5 +1,3 @@
-import { BlobNotFoundError, del, head, list } from '@vercel/blob'
-
 export const BACKUP_PREFIX = 'database-backups/'
 export const MAX_INVENTORY_ITEMS = 1_000
 export const RETENTION_DAYS = 90
@@ -9,6 +7,10 @@ const MANUAL_PATH = /^database-backups\/manual\/(\d{4})\/(\d{2})\/vyntechs-(\d{4
 
 function fail(message) {
   throw new Error(`encrypted backup retention failed: ${message}`)
+}
+
+function isNotFound(error) {
+  return error?.name === 'BlobNotFoundError'
 }
 
 function parseUtcDate(date, time = '00:00:00') {
@@ -54,7 +56,7 @@ export function parseBackupPath(pathname) {
   fail('backup inventory contains a pathname outside the backup contract')
 }
 
-export async function collectBackupInventory(client = { list }) {
+export async function collectBackupInventory(client) {
   const inventory = []
   const seenPathnames = new Set()
   const seenCursors = new Set()
@@ -111,7 +113,7 @@ export function selectExpiredBackups(inventory, now = new Date()) {
   return inventory.filter((backup) => backup.createdAt.getTime() < cutoff.getTime())
 }
 
-export async function reconcileDelete(pathname, etag, client = { del, head }) {
+export async function reconcileDelete(pathname, etag, client) {
   try {
     await client.del(pathname, { ifMatch: etag })
     return
@@ -119,7 +121,7 @@ export async function reconcileDelete(pathname, etag, client = { del, head }) {
     try {
       await client.head(pathname)
     } catch (headError) {
-      if (headError instanceof BlobNotFoundError || headError?.name === 'BlobNotFoundError') {
+      if (isNotFound(headError)) {
         return
       }
       fail('exact-path deletion readback could not be completed')
@@ -129,7 +131,7 @@ export async function reconcileDelete(pathname, etag, client = { del, head }) {
   }
 }
 
-export async function retainExpiredBackups(now = new Date(), client = { list, del, head }) {
+export async function retainExpiredBackups(now = new Date(), client) {
   const inventory = await collectBackupInventory(client)
   const expired = selectExpiredBackups(inventory, now)
   for (const backup of expired) {
