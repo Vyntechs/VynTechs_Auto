@@ -803,6 +803,24 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`, `supers
 
 ---
 
+### VTA-SEC-001 — Implementation correction (A3 encrypted-backup candidate)
+
+- **Task/branch:** `VTA-SEC-001-A3-01` on `security/vta-sec-001-encrypted-backups`.
+- **Draft PR:** pending the repository-local human commit-identity gate; this
+  source candidate must not be represented as an enabled backup capability
+  until its draft PR and fresh verification exist.
+- **Correction:** the disabled workflow path now has an encrypted-only source
+  candidate: PostgreSQL custom dump bytes stream directly to pinned `age`, and
+  the isolated pinned Blob SDK may send only verified ciphertext to a
+  deterministic private path. It removes the GitHub Release/artifact path and
+  `contents: write` permission.
+- **Still gated:** A4 must prove the complete synthetic private upload,
+  readback, restore, wrong-key, duplicate, retention, alert, and rollback
+  behavior. A5 alone may create/connect a store, issue credentials or key
+  material, enable the workflow, access live data, or restore production.
+
+---
+
 ## Sources for external claims
 
 - Twilio: [Messaging Policy](https://www.twilio.com/en-us/legal/messaging-policy) · [A2P fees](https://help.twilio.com/hc/en-us/articles/1260803965530-A2P-10DLC-Campaign-Registration-Guide) · [US SMS pricing](https://www.twilio.com/en-us/sms/pricing/us) · [business information requirements](https://www.twilio.com/docs/messaging/compliance/a2p-10dlc/collect-business-info)

@@ -1,101 +1,126 @@
-# Restoring Vyntechs from a Daily Backup
+# Restoring Vyntechs from an Encrypted Database Backup
 
-Plain-English steps for the worst-case scenario: production database is wiped, corrupted, or otherwise broken. You need to bring it back from a GitHub Actions backup artifact.
+This is the controlled recovery procedure for the encrypted database-backup
+candidate in `.github/workflows/daily-db-backup.yml`. At the time of this
+document, the workflow remains disabled and no backup store, credential, age
+identity, or production restore is created or authorized by this source change.
 
-## What you have
+## What is protected
 
-- **Daily SQL dumps** stored as GitHub Actions artifacts on this repo. Each is a single `.sql.gz` file containing the entire database (schema + data).
-- **90 days of retention** — every day's dump for the last 90 days is downloadable from the Actions tab.
-- Every dump is created by the workflow at `.github/workflows/daily-db-backup.yml`.
+- Each archive is a PostgreSQL 17 custom-format, compressed dump encrypted with
+  [age](https://age-encryption.org/) before it leaves the GitHub runner.
+- The private Blob store can upload, read, list, and delete ciphertext, but it
+  cannot decrypt it. It is deliberately separate from the offline age identity.
+- Scheduled objects use the deterministic private path
+  `database-backups/daily/YYYY/MM/vyntechs-YYYY-MM-DD.dump.age`. Manual objects
+  include the UTC timestamp and GitHub run ID under `database-backups/manual/`.
+- The store retains objects for 90 days. An existing deterministic scheduled
+  path is a failed duplicate, never an overwrite.
 
-## Step 1 — Find the backup you want
+Do not place an age identity, a Blob credential, a database URL, or an object
+URL in GitHub, chat, source control, a shell history, or a ticket.
 
-In the terminal:
+## Before any restore
+
+1. Obtain explicit authority for the target and restore operation. A production
+   restore is destructive and remains an A5-only decision.
+2. Select one exact private object using authenticated Vercel access. Prefer a
+   short-lived signed download at execution time where the authorized store
+   supports it; otherwise use a least-privilege, time-bounded operator session.
+3. Obtain one offline age identity from the documented custody process. The
+   Blob operator must not also be the sole holder of this identity.
+4. Prepare a fresh synthetic/non-production PostgreSQL target first. Confirm
+   that it is isolated and can be discarded after validation.
+5. Work only in an encrypted, access-controlled environment with a protected
+   temporary directory. Keep terminals, shell history, logs, and screen shares
+   clear of credentials, object URLs, and decrypted data.
+
+## Download and authenticate the ciphertext
+
+Use the documented, locked `@vercel/blob@2.8.0` SDK to save the selected
+ciphertext to the controlled temporary directory after obtaining credentials
+through the approved custody channel. Its authenticated `get()` call must use
+the exact pathname with `access: 'private'` and `useCache: false`; continue
+only after it returns status `200` and a complete stream is written to
+`./controlled-temp/backup.dump.age`.
+
+Do not use a public URL, GitHub Release, Actions artifact, cache, or alternate
+storage sink. Confirm the command completed successfully before proceeding.
+
+## Decrypt completely before any database mutation
+
+Age authenticates ciphertext only when decryption completes. It can write
+unauthenticated partial output before reporting a later integrity failure, so
+never pipe `age` directly into `pg_restore` or any mutable database command.
 
 ```bash
-gh run list --workflow=daily-db-backup.yml --repo Vyntechs/VynTechs_Auto --limit 30
+umask 077
+mkdir -p ./controlled-temp
+age --decrypt \
+  --identity ./offline-custody/authorized-backup-identity.txt \
+  --output ./controlled-temp/backup.restore-input \
+  ./controlled-temp/backup.dump.age
+
+pg_restore --list ./controlled-temp/backup.restore-input >/dev/null
+createdb -T template0 vyntechs_restore_synthetic
+pg_restore \
+  --clean --if-exists \
+  --no-owner --no-privileges \
+  --dbname vyntechs_restore_synthetic \
+  ./controlled-temp/backup.restore-input
 ```
 
-You'll see a list with dates. Pick the run that's the latest one BEFORE whatever broke things (i.e., if you screwed it up at 3 PM today, restore from yesterday's run, not today's).
+Do not run `createdb`, `pg_restore`, or any equivalent command against
+production without its separate A5 authorization. First inspect the synthetic
+restore, validate schema/data integrity, run the agreed application smoke
+checks, and record only non-sensitive evidence.
 
-## Step 2 — Download that backup
+### Zero-media reconciliation before reopening
 
-```bash
-gh run download <RUN-ID> --repo Vyntechs/VynTechs_Auto
-```
-
-This drops a folder called `vyntechs-db-backup-<run-id>/` containing one file like `vyntechs-2026-05-04-0700.sql.gz`.
-
-## Step 3 — Decide where to restore TO
-
-You have two options:
-
-**Option A: Restore back to the same Supabase project** (after wiping or if Supabase already cleared it). This brings prod back exactly as of that backup.
-
-**Option B: Restore to a fresh Supabase project**, then point the app at the new project. Useful if the old project is unreachable or you want to keep the broken one for forensics.
-
-Either way, you need the `DATABASE_URL_DIRECT` for the destination (port 5432 direct, not the pooler — pg_restore needs session mode).
-
-## Step 4 — Restore the dump
-
-```bash
-gunzip -c vyntechs-db-backup-*/vyntechs-*.sql.gz | psql "$DATABASE_URL_DIRECT"
-```
-
-This runs the SQL file against the destination database. The dump uses `--clean --if-exists` so it drops existing tables before recreating, which is what you want when restoring into an existing-but-broken DB. **If you're restoring into a populated DB you don't want to overwrite, stop and copy elsewhere first.**
-
-Watch the output. There may be `NOTICE` messages about objects that don't exist — those are fine. Real errors will say `ERROR:`.
-
-## Step 5 — Update Vercel env vars (only if you restored to a new project)
-
-If you restored to a new Supabase project (Option B), update these on Vercel:
-
-- `DATABASE_URL` — new project's pooler URL
-- `DATABASE_URL_DIRECT` — new project's direct URL
-- `NEXT_PUBLIC_SUPABASE_URL` — new project's URL
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
-
-Then redeploy production by pushing a no-op commit to `main`, or via Vercel dashboard.
-
-## Step 6 — Sanity check
-
-- Sign in to vyntechs.dev
-- Check `/api/health` — should report `{ "ok": true }` for application liveness; verify database readiness through authenticated provider monitoring.
-- Verify a known work order still exists in `/today`
-- Verify assignments, quotes, and text work notes are readable
-- Confirm the diagnostic release remains off
-
-## Step 7 — Reconcile the no-media boundary before reopening
-
-Operational object storage is intentionally absent in the current release.
-Old database backups may restore dormant media metadata rows, but never media bytes.
+Operational object storage is intentionally absent from the restored
+environment. Old database backups may restore dormant media metadata rows, but never media bytes.
 Complete the Row 49 zero-media reconciliation before reopening the restored environment.
+This database backup must not be described or used as a media backup.
 
-Do not create a storage bucket, restore historical objects, or treat the daily
-database workflow as a media backup. If unexpected media bytes or a live media
-dependency appears, keep the restored environment closed and escalate.
+### Wrong key or integrity failure
 
-If something looks off, you can re-run the restore from a different (older) backup — they don't interfere with each other.
+If `age --decrypt` exits non-zero, treat the archive as unauthenticated or the
+identity as unauthorized. Do not invoke `pg_restore`, retry against another
+database, or stream partial output anywhere. Securely remove the partial file,
+record a non-sensitive failure receipt, and escalate through the key-custody
+process.
 
-## How long does this take?
+## Key custody and rotation
 
-For a small dataset (a few MB compressed), under 5 minutes from "find the backup" to "site is back up." Most of that is waiting for `gh run download`. Actual restore is seconds.
+- A5 must establish at least one offline primary identity and a separately
+  controlled recovery identity. Only their public recipients belong in the
+  GitHub Actions variable.
+- Store private identities outside GitHub, Vercel, the runner, source control,
+  and ordinary chat. Recovery access must require the documented dual-control
+  process.
+- Before rotating recipients, add the successor recipient under controlled
+  authority and prove it with a synthetic archive. Retain every retired private
+  identity until the final object encrypted for it has aged out of the 90-day
+  retention window.
+- Test a wrong-key decrypt during the A4 synthetic proof. It must fail before
+  any restore mutation.
 
-## What this WON'T cover
+## Cleanup, rollback, and re-enable gates
 
-- Data created **between** the last backup and the disaster. If the workflow runs at 7 UTC and you wipe the DB at 18 UTC, you lose 11 hours of work.
-  - Mitigation: a more recent backup means less loss. The workflow can be triggered manually any time with `gh workflow run daily-db-backup.yml`.
-  - For zero data loss, you'd need Supabase Pro + Point-in-Time Recovery ($100+/mo).
-- Operational object storage. The current release intentionally has none, and the database backup is not a media backup.
+After an authorized synthetic restore, securely remove the decrypted archive
+and its temporary directory according to the encrypted-host policy (use a
+verified secure-delete mechanism where supported; otherwise destroy the
+encrypted ephemeral volume). Retain ciphertext only under the configured
+private-store retention rule.
 
-## Testing the restore (recommended)
+If backup behavior is unsafe or uncertain, disable the workflow before any
+further run, revoke the backup-only Blob credential and database credential,
+and preserve existing ciphertext until an authorized retention decision. Do
+not delete a store, overwrite an archive, or publish a replacement backup as a
+rollback shortcut.
 
-Untested backups aren't backups. Once a quarter:
-
-1. Spin up a free Supabase project as a sandbox
-2. Run the restore steps above against it
-3. Verify the dump applies cleanly
-4. Delete the sandbox project
-
-Costs $0, takes ~15 minutes, and confirms backups still work before you actually need them.
+This source candidate requires A4 synthetic proof of private upload, denied
+unauthenticated access, authorized decrypt/restore, wrong-key refusal,
+duplicate protection, partial-upload behavior, retention, alert delivery, and
+disable/revoke rollback. Connecting a store, issuing credentials or identities,
+enabling the workflow, or restoring production remains A5-only.
