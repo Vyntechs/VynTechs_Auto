@@ -806,8 +806,8 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`, `supers
 ### VTA-SEC-001 — Implementation correction (A3 encrypted-backup candidate)
 
 - **Task/branch:** `VTA-SEC-001-A3-01` on `security/vta-sec-001-encrypted-backups`.
-- **Draft PR:** pending the repository-local human commit-identity gate; this
-  source candidate must not be represented as an enabled backup capability
+- **Draft PR:** [#252](https://github.com/Vyntechs/VynTechs_Auto/pull/252).
+  This source candidate must not be represented as an enabled backup capability
   until its draft PR and fresh verification exist.
 - **Correction:** the disabled workflow path now has an encrypted-only source
   candidate: PostgreSQL custom dump bytes stream directly to pinned `age`, and
