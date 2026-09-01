@@ -143,6 +143,25 @@ export function TodayHome({
             Quick ticket
           </Link>
         )}
+        {diagnosticsEntitled && (
+          <Link
+            href="/sessions/new"
+            aria-label="New diagnosis"
+            className="btn btn-primary"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              minHeight: 44,
+              padding: '6px 12px',
+              fontSize: 13,
+              textDecoration: 'none',
+            }}
+          >
+            <Plus size={14} weight="bold" aria-hidden="true" />
+            New diagnosis
+          </Link>
+        )}
       </div>
       <div
         style={{

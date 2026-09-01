@@ -36,13 +36,24 @@ describe('release policy', () => {
     expect(isDiagnosticsReleaseEnabled()).toBe(true)
   })
 
-  it('keeps production hard-off even when legacy is requested', () => {
+  it('allows an explicit reviewed legacy release in production', () => {
     vi.stubEnv('NODE_ENV', 'production')
     vi.stubEnv('DIAGNOSTICS_RELEASE', 'legacy')
 
-    expect(getDiagnosticsRelease()).toBe('off')
-    expect(isDiagnosticsReleaseEnabled()).toBe(false)
+    expect(getDiagnosticsRelease()).toBe('legacy')
+    expect(isDiagnosticsReleaseEnabled()).toBe(true)
   })
+
+  it.each([undefined, '', 'off', 'on', 'unknown'])(
+    'keeps production closed for %s',
+    (value) => {
+      vi.stubEnv('NODE_ENV', 'production')
+      vi.stubEnv('DIAGNOSTICS_RELEASE', value)
+
+      expect(getDiagnosticsRelease()).toBe('off')
+      expect(isDiagnosticsReleaseEnabled()).toBe(false)
+    },
+  )
 
   it('has no operational-media enablement path', () => {
     vi.stubEnv('OPERATIONAL_MEDIA_RELEASE', 'on')

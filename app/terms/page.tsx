@@ -41,7 +41,7 @@ export default async function TermsPage() {
         <section>
           <h2>§2 — Current service</h2>
           <p>The current paid ShopOS service supports <strong>work orders, assignments, quotes, status, manual findings, and text work notes</strong>, together with related customer, vehicle, authorization, and job-flow records.</p>
-          <p><strong>Operational file intake is unavailable in this release.</strong> The diagnostic engine is also unavailable. Historical submissions or records may remain where described in the Privacy Policy, but that history does not make either capability part of the current offer.</p>
+          <p><strong>Operational file intake is unavailable in this release.</strong> Diagnostic engine access is a separate, entitlement-controlled capability available only to authorized shops; it is not included for every shop. Historical file submissions or related records may remain where described in the Privacy Policy, but that history does not make file intake part of the current offer.</p>
           <p>Beta features may change, be corrected, or be removed. We will not represent an unavailable feature as included in the paid service.</p>
         </section>
 

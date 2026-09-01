@@ -17,7 +17,9 @@ export const TICKET_CORRECTION_UNAVAILABLE = {
 } as const
 
 export function getDiagnosticsRelease(): DiagnosticsRelease {
-  if (process.env.NODE_ENV === 'production') return 'off'
+  // Production remains fail-closed: a reviewed deployment must opt in with
+  // the exact legacy value. Missing, malformed, and explicit off values never
+  // expose the diagnostic engine.
   return process.env.DIAGNOSTICS_RELEASE === 'legacy' ? 'legacy' : 'off'
 }
 

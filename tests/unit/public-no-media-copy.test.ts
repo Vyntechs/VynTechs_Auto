@@ -102,7 +102,9 @@ describe('public current-release truth', () => {
       'text work notes',
     ]) expect(copy.toLowerCase()).toContain(truth)
     expect(copy).toContain('Operational file intake is unavailable in this release.')
-    expect(copy).toContain('The diagnostic engine is unavailable in this release.')
+    expect(copy).toContain('Diagnostic engine access is available only to authorized shops.')
+    expect(copy).toContain('Diagnostic engine access is a separate, entitlement-controlled capability')
+    expect(copy).not.toContain('The diagnostic engine is unavailable in this release.')
   })
 
   it('removes the public design fixture and retired diagnostic screenshots without touching shell assets', async () => {

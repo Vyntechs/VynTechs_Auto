@@ -4,6 +4,7 @@ import { getServerSupabase } from '@/lib/supabase-server'
 import { requireUserAndProfile } from '@/lib/auth'
 import { listDueFollowUpsForTech } from '@/lib/comeback/list'
 import { canCurate } from '@/lib/curator/can-curate'
+import { hasDiagnostics } from '@/lib/entitlements'
 import { TodayHome } from '@/components/screens/today-home'
 import { canAssignWork, canBuildQuotes, canCreateTickets } from '@/lib/shop-os/capabilities'
 import { getShopTeam } from '@/lib/intake/team'
@@ -14,16 +15,17 @@ export default async function TodayPage() {
   const ctx = await requireUserAndProfile({ supabase, db })
   if (!ctx) redirect('/sign-in')
 
-  // Diagnostics remain deliberately dark until AutoEye is ready. Today still
-  // gives the shop a complete ordinary repair-order command surface.
-  const diagnosticsEntitled = false
   const canDispatchWork = canAssignWork(ctx.profile.role)
-  const [dueFollowUps, todayJobs, shopTeam] = await Promise.all([
+  const [dueFollowUps, todayJobs, shopTeam, diagnosticsEntitled] = await Promise.all([
     listDueFollowUpsForTech(db, ctx.profile.id),
     listTodayTicketJobs(db, { actor: ticketActorFromProfile(ctx.profile) }),
     canDispatchWork && ctx.profile.shopId
       ? getShopTeam({ db, shopId: ctx.profile.shopId, currentUserId: ctx.profile.id })
       : Promise.resolve({ members: [], workloadFailed: false }),
+    hasDiagnostics(db, {
+      shopId: ctx.profile.shopId,
+      isComp: ctx.profile.isComp,
+    }),
   ])
   return (
     <TodayHome
