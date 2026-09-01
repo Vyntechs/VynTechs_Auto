@@ -22,6 +22,7 @@ vi.mock('@/lib/supabase-server', () => ({
 }))
 vi.mock('@/lib/db/client', () => ({ db: {} }))
 vi.mock('@/lib/comeback/list', () => ({ listDueFollowUpsForTech: vi.fn() }))
+vi.mock('@/lib/entitlements', () => ({ hasDiagnostics: vi.fn() }))
 vi.mock('@/lib/intake/team', () => ({ getShopTeam: vi.fn(async () => ({ members: [], workloadFailed: false })) }))
 vi.mock('@/lib/tickets', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/tickets')>()
@@ -57,11 +58,13 @@ vi.mock('@/components/screens/today-home', () => ({
 import TodayPage from '@/app/(app)/today/page'
 import { requireUserAndProfile } from '@/lib/auth'
 import { listDueFollowUpsForTech } from '@/lib/comeback/list'
+import { hasDiagnostics } from '@/lib/entitlements'
 import { getShopTeam } from '@/lib/intake/team'
 import { listTodayTicketJobs } from '@/lib/tickets'
 
 const requireUserMock = vi.mocked(requireUserAndProfile)
 const followUpsMock = vi.mocked(listDueFollowUpsForTech)
+const diagnosticsMock = vi.mocked(hasDiagnostics)
 const shopTeamMock = vi.mocked(getShopTeam)
 const todayJobsMock = vi.mocked(listTodayTicketJobs)
 
@@ -129,6 +132,7 @@ describe('TodayPage Shop OS composition', () => {
       user: { id: profile.userId, email: 'taylor@shop.test' },
     })
     followUpsMock.mockResolvedValue([])
+    diagnosticsMock.mockResolvedValue(true)
     todayJobsMock.mockResolvedValue(jobs)
     shopTeamMock.mockResolvedValue({ members: [], workloadFailed: false })
   })
@@ -163,20 +167,24 @@ describe('TodayPage Shop OS composition', () => {
     expect(screen.getByText('dispatch board true')).toBeInTheDocument()
   })
 
-  it('keeps diagnostics and legacy sessions dark while preserving ticket work', async () => {
+  it('passes the current shop diagnostics entitlement into Today', async () => {
     render(await TodayPage())
 
     expect(screen.getByText('ticket jobs 1')).toBeInTheDocument()
     expect(screen.getByText('active sessions')).toBeInTheDocument()
     expect(screen.getByText('closed sessions')).toBeInTheDocument()
-    expect(screen.getByText('diagnostics false')).toBeInTheDocument()
+    expect(screen.getByText('diagnostics true')).toBeInTheDocument()
+    expect(diagnosticsMock).toHaveBeenCalledWith({}, {
+      shopId: profile.shopId,
+      isComp: profile.isComp,
+    })
   })
 
-  it('does not load diagnostic sessions and still loads the authorized ticket projection', async () => {
+  it('keeps Today manual when the current shop does not have diagnostics', async () => {
+    diagnosticsMock.mockResolvedValue(false)
+
     render(await TodayPage())
 
-    expect(screen.getByText('active sessions')).toBeInTheDocument()
-    expect(screen.getByText('closed sessions')).toBeInTheDocument()
     expect(screen.getByText('diagnostics false')).toBeInTheDocument()
     expect(todayJobsMock).toHaveBeenCalledWith({}, { actor })
     expect(followUpsMock).toHaveBeenCalledWith({}, profile.id)

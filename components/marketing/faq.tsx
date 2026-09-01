@@ -1,7 +1,7 @@
 const FAQS = [
   { q: 'What is available in the current release?', a: 'Work orders, assignments, job flow, manual findings, text work notes, quotes, authorization, and job status.' },
   { q: 'Can I upload photos or files?', a: <><span>Operational file intake is unavailable in this release.</span> The current workflow is text-first.</> },
-  { q: 'Does this release diagnose vehicles?', a: <><span>The diagnostic engine is unavailable in this release.</span> Technicians can still record findings manually and keep the repair order moving.</> },
+  { q: 'Does this release diagnose vehicles?', a: <><span>Diagnostic engine access is available only to authorized shops.</span> Technicians without access can still record findings manually and keep the repair order moving.</> },
   { q: 'Why one technician per account?', a: 'It keeps access, ownership, and price simple: one technician, one account, $100/month.' },
   { q: 'Does it work on phone and desktop?', a: 'Yes. The same ShopOS screens are designed for a phone under the hood, a tablet at the vehicle, and a larger office screen.' },
   { q: 'Where does my data live?', a: 'US-hosted services, encrypted in transit and at rest where supported. Formal compliance certifications are not complete yet; contact us if your shop needs a DPA.' },

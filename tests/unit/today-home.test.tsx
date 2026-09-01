@@ -124,7 +124,7 @@ describe('TodayHome', () => {
     vi.unstubAllGlobals()
   })
 
-  it('does not expose a standalone new-diagnosis entrance', () => {
+  it('gives entitled users a standalone new-diagnosis entrance', () => {
     render(
       <TodayHome
         techName="Brandon"
@@ -132,12 +132,20 @@ describe('TodayHome', () => {
         closedToday={[]}
       />,
     )
-    expect(screen.queryByRole('link', { name: /new diagnosis/i })).toBeNull()
+    expect(screen.getByRole('link', { name: /new diagnosis/i })).toHaveAttribute(
+      'href',
+      '/sessions/new',
+    )
   })
 
-  it('keeps the empty state pointed at ShopOS work', () => {
+  it('keeps the standalone entrance hidden without diagnostics access', () => {
     render(
-      <TodayHome techName="Brandon" inProgress={[]} closedToday={[]} />,
+      <TodayHomeComponent
+        techName="Brandon"
+        inProgress={[]}
+        closedToday={[]}
+        diagnosticsEntitled={false}
+      />,
     )
     expect(screen.queryByRole('link', { name: /new diagnosis/i })).toBeNull()
     expect(screen.getByText(/new repair orders and quick tickets show up here/i)).toBeInTheDocument()
@@ -182,7 +190,10 @@ describe('TodayHome', () => {
     expect(screen.getByText(/Check-ins · 1/i)).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'In progress' })).toBeInTheDocument()
     expect(screen.getByText(/Closed today · 1/i)).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /new diagnosis/i })).toBeNull()
+    expect(screen.getByRole('link', { name: /new diagnosis/i })).toHaveAttribute(
+      'href',
+      '/sessions/new',
+    )
   })
 
   it('gives dispatch-only users a direct ticket path without offering an invalid claim', () => {
