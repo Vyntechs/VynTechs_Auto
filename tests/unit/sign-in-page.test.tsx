@@ -44,6 +44,15 @@ describe('SignInPage', () => {
     expect(screen.queryByText(/your sessions/i)).toBeNull()
   })
 
+  it('never lets a pre-hydration submit put the password in the URL', () => {
+    const { container } = render(<SignInPage />)
+    const form = container.querySelector('form')
+    // A form with no method GETs, which appends every named field — including
+    // the password — to the address bar, the history entry and the Referer.
+    // The handler that stops that cannot run before React hydrates.
+    expect(form?.getAttribute('method')).toBe('post')
+  })
+
   it('renders a "Forgot password?" link pointing at /forgot-password', () => {
     render(<SignInPage />)
     const link = screen.getByRole('link', { name: /forgot password/i })
